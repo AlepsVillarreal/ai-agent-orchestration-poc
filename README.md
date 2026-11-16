@@ -24,8 +24,27 @@ cp .env.example .env
 docker compose up -d redis
 ```
 
+`uv sync` lee `.python-version` y `uv.lock`: descarga Python 3.12 si no está instalado y crea el entorno virtual en `.venv/` (ignorado por git). No es necesario activarlo; usa `uv run <comando>` para ejecutar dentro del entorno.
+
+### Verificar el entorno
+
+```bash
+# Redis debe aparecer como "healthy"
+docker compose ps
+
+# Debe responder PONG
+docker compose exec redis redis-cli ping
+
+# Debe imprimir la versión de google-adk
+uv run python -c "import google.adk; print(google.adk.__version__)"
+```
+
+Para detener Redis: `docker compose down` (los datos se conservan en el volumen `redis-data`; usa `docker compose down -v` para borrarlos).
+
 ## Tests
 
 ```bash
 uv run pytest
 ```
+
+> Mientras no exista la carpeta `tests/`, pytest terminará con *"no tests ran"* (código de salida 5). Es esperado en esta etapa.

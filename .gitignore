@@ -28,3 +28,9 @@ htmlcov/
 .vscode/
 .idea/
 .DS_Store
+
+# Local working notes (not part of the deliverable)
+CLAUDE.md
+docs/TASK.md
+docs/prompts/
+docs/research/
