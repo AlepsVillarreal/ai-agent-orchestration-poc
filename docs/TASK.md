@@ -1,7 +1,6 @@
 # Enunciado del ejercicio técnico (texto original)
 
 > Copia literal del enunciado recibido para la entrevista técnica. No editar: es la fuente de verdad de los requerimientos.
-> Resumen operativo y estado del proyecto: ver [`../CLAUDE.md`](../CLAUDE.md).
 
 ---
 
