@@ -191,7 +191,7 @@ ejecuta una tool o qué se guarda se sigue consultando al autor.
     del caso 2. Nunca es la única prueba de un fallo del modelo, porque un timeout no trae
     código de estado.
   - *Sin imports privados:* nada de `google.adk.workflow._errors`.
-  - *Sin `retry_config`* en el nodo del turno ni en el intérprete. Un `RetryConfig()` con los
+  - *Sin `retry_config`* [enmendado en D1.2] en el nodo del turno ni en el intérprete. Un `RetryConfig()` con los
     campos por defecto reintenta cualquier excepción hasta 5 veces, lo que vuelve a ejecutar
     el cuerpo y gasta cuota de la capa gratuita.
   - *Reanudación (resumability) desactivada,* que es el valor por defecto
@@ -1135,8 +1135,9 @@ por el autor
   3 intentos por llamada, con espera exponencial y jitter de 2 a 30 s, ante un 429 o un 503
   (D30). Gana además `--resume RUTA`, solo junto con `--run`: copia lo que un JSONL anterior ya
   guardó y llama solo a los escenarios que faltan (D29). La espera entre llamadas reales es de
-  13 s. El nodo del turno y el intérprete de `assistant/` siguen sin reintentos (D1.1). Lo
-  prueban `test_retries_only_in_the_harness` y `test_resume_calls_only_what_was_not_saved`.
+  13 s. El nodo del turno y el intérprete de `assistant/` siguen sin reintentos (D1.1)
+  [enmendado en D1.2]. Lo prueban `test_harness_keeps_its_own_retries` y
+  `test_resume_calls_only_what_was_not_saved`.
 - **Motivo:** la primera corrida de humo se detuvo en `N1`, 12 de 23, por un
   `503 UNAVAILABLE` ("high demand"), no por cuota. Repetirla entera gastaría cuota de la capa
   gratuita en 11 salidas ya guardadas. El arnés es una herramienta de medición, no el turno: no
@@ -1148,7 +1149,7 @@ por el autor
   límite más alto adivinado (D2, *Umbral*).
 - **Precisa D1.1:** `retry_config` (el reintento de un nodo de ADK, que D1.1 prohíbe) y
   `HttpRetryOptions` (el del cliente HTTP de google-genai) son mecanismos distintos; ninguno
-  llega a `assistant/`. El texto de D1.1 no se edita.
+  llega a `assistant/` [enmendado en D1.2]. El texto de D1.1 no se edita.
 - **Hechos de google-adk 2.14.1 y google-genai 2.34.0** (para las tareas 19 y 20):
   - `Gemini.retry_options` vale `None` por defecto (`google/adk/models/google_llm.py:188`), y
     con `None` google-genai hace un solo intento (`tenacity.stop_after_attempt(1)`,
@@ -1334,3 +1335,74 @@ por el orquestador; revisable
   código a elegir uno (TASK.md línea 252).
 - **Descartadas:** exigir la misma `certainty`; quedarse con el `depends_on` de la primera
   operación.
+
+**D1.2 · Enmienda a D1.1: el intérprete del agente reintenta un 503 una vez** (2026-11-17) ·
+decidida por el autor
+
+- **Decisión:** el intérprete del agente en vivo (CLI y `adk web`) usa un `Gemini` con
+  `retry_options` de google-genai (`interpreter_model()` e `INTERPRETER_RETRY_OPTIONS`,
+  `assistant/interpreter.py`): 2 intentos en total, solo ante un 503, espera inicial de 1 s y
+  máxima de 5 s. Con 2 intentos hay una sola espera, de 1–2 s (D36). El 429 no se reintenta.
+  Agotados los intentos sale la `ServerError` original, que es el caso 2 de D1.1: "modelo no
+  disponible", sin tocar el estado. El `retry_config` del nodo del turno sigue en `None` y la
+  reanudación sigue desactivada. El arnés conserva su propia configuración (D28, D30), porque
+  siempre pasa su propio modelo.
+- **Motivo:** el intérprete no tiene efectos (sin tools ni `output_key`, D1 y D1.1), y la
+  ejecución de una tool va aparte, con su clave de idempotencia (D9): repetir su petición no
+  puede ejecutar una tool dos veces (TASK.md líneas 286 y 558). El reintento ocurre antes de
+  cualquier ejecución, y el de una tool nunca es automático (D8.3; líneas 272 y 559). Un pico
+  breve de demanda, como el 503 de la tarea 06 (D28), se vuelve una respuesta más lenta en vez
+  de "modelo no disponible", y la espera queda acotada a unos segundos (líneas 25, 497 y 580).
+- **Sin 429:** es la cuota de la capa gratuita agotada; esperar unos segundos no la devuelve,
+  y repetir gasta cuota y vuelve a fallar.
+- **Sigue en pie D1.1:** un `RetryConfig` en el nodo volvería a ejecutar el cuerpo del turno
+  y gastaría cuota. Este reintento vive debajo, en el cliente HTTP del modelo del intérprete:
+  el nodo sigue haciendo una sola llamada al modelo por turno, que ahora puede ser hasta 2
+  peticiones HTTP. El texto de D1.1 y de D28 no se edita; llevan la marca.
+- **Desviación aceptada por el autor (red transitoria):** con cualquier `retry_options`,
+  google-genai reintenta además `httpx.ConnectError` y `httpx.TimeoutException`
+  (`google/genai/_api_client.py:96-101` y `:683-687`, google-genai 2.34.0), y no hay un
+  interruptor público para apagarlo. Por eso el intérprete del agente también reintenta una
+  vez un fallo de conexión, no solo un 503; el tope sigue en 2 intentos. El autor lo aceptó
+  para el agente, no solo para el arnés (D30), en el pedido de la unidad 06b ("Document this
+  rather than fight it"). google-genai no fija un timeout por petición
+  (`_api_client.py:1414-1415`), así que en la práctica cubre fallos de conexión, no esperas
+  largas.
+- **Lo prueban:** `test_interpreter_configuration` (el intérprete lleva un `Gemini` con
+  `INTERPRETER_RETRY_OPTIONS`), `test_interpreter_retry_options` (2 intentos, `[503]`, 1.0 y
+  5.0 s, `exp_base` y `jitter` sin fijar), `test_http_retry_through_the_turn_node` (por el
+  `Runner` y el nodo, sin red: `503_then_ok`, `503_twice`, `429`, `500` y
+  `connect_error_twice`, con 2, 2, 1, 1 y 2 peticiones; los fallos dan "modelo no disponible"
+  con el `pending` intacto), `test_harness_keeps_its_own_retries` (el arnés no cambia y su
+  configuración es otra) y `test_no_retry_config_and_rerun_on_resume` (el nodo sigue sin
+  `retry_config`).
+- **Sin verificar:** un 503 real de Gemini (la forma exacta del cuerpo de error y la espera
+  real). No se hizo ninguna llamada real; el cuerpo simulado usa la forma que lee
+  `google/genai/errors.py`.
+
+**D36 · Reintento del intérprete: espera del SDK, sin marca en el log y prueba sin red**
+(2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:**
+  - *Espera:* `exp_base` y `jitter` quedan en los valores del SDK (2 y 1), como D30. Con 2
+    intentos la única espera es `initial_delay` más un jitter de 0 a 1 s, es decir 1–2 s
+    (`tenacity/wait.py:266-273`); `max_delay=5.0` solo acota si alguien sube `attempts`.
+  - *Log:* un turno reintentado que termina bien no deja marca en la línea `assistant.turn`
+    (D21) y lleva los mismos campos que uno sin reintento. La línea INFO que google-genai
+    escribe antes de cada reintento (`_api_client.py:699`) tampoco sale en la CLI, que deja el
+    logger raíz en WARNING (D22); solo se nota la latencia. Agotados los intentos, la línea
+    dice `route=model_unavailable error=<tipo>`, como cualquier fallo del modelo.
+  - *Prueba:* además de las aserciones de configuración, una de punta a punta con un `Gemini`
+    real sobre `httpx.MockTransport` (APIs públicas `Gemini.client_kwargs` y
+    `HttpOptions.httpx_async_client`), con los intentos y códigos de producción y las esperas
+    anuladas: sin red, sin clave real y sin módulos privados.
+  - *Nombres:* `build_interpreter()` sin modelo usa `interpreter_model()`, así que el
+    intérprete de producción y el que se construye por defecto son el mismo;
+    `INTERPRETER_RETRY_OPTIONS` no se confunde con `phase0.run.RETRY_OPTIONS`.
+- **Motivo:** ninguna cambia lo que ve el usuario, cuándo se ejecuta una tool ni qué se
+  guarda. La prueba de punta a punta es la única que comprueba que tras dos 503 sale la
+  plantilla sin cambio de estado, y no gasta cuota (TASK.md líneas 522 y 580).
+- **Descartada:** probar el reintento con el modelo real (gasta cuota y un 503 no se puede
+  provocar).
+- **Pendiente:** la tarea 19 documenta que un reintento que termina bien no deja rastro en la
+  CLI, como límite de observabilidad (TASK.md línea 471).
