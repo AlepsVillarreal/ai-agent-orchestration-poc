@@ -62,7 +62,7 @@ printf 'Necesito crear un ticket\n' | uv run python -m assistant.cli
 - Al arrancar se comprueba Redis (`REDIS_URL`, por defecto `redis://localhost:6379/0`) y después `GOOGLE_API_KEY`; si algo falla, la CLI sale con código 1 y un mensaje que dice qué hacer.
 - Si el modelo falla (cuota, timeout, red) o su respuesta no se puede leer, el agente responde con una plantilla y no cambia el estado de la conversación.
 
-> **Estado actual:** el agente reconoce la solicitud y pide los datos que faltan (caso A). Todavía no valida, no confirma ni ejecuta herramientas: una solicitud con todos los datos, la continuación de una operación pendiente o una solicitud con varias operaciones o ambigua responden con mensajes provisionales.
+> **Estado actual:** el agente reconoce la solicitud, pide los datos que faltan (caso A) y conserva y completa los que llegan en mensajes siguientes (caso B), mostrando qué anotó o cambió. Todavía no valida, no confirma ni ejecuta herramientas: una solicitud con todos los datos, una confirmación, un cambio de intención o una solicitud con varias operaciones o ambigua responden con mensajes provisionales.
 
 ## Prueba de humo del intérprete (fase 0)
 

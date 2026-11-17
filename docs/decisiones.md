@@ -1002,7 +1002,7 @@ revisable
     stdin por tubería, cada línea se repite como `> …` antes de la respuesta. Solo se
     imprimen los eventos con texto cuyo autor no es `interpreter` (D1.1, *Costos aceptados*).
   - *Log:* la línea de cada turno no lleva valores de argumentos ni el texto del mensaje; la
-    tarea 08 suma los cambios de fusión con sus valores (D4 regla 8).
+    tarea 08 suma los cambios de fusión con sus valores (D4 regla 8). [resuelto en D42]
 
   Lo prueban `test_chat_prints_only_replies`, `test_cli_exits_clearly_when_redis_is_down`,
   `test_cli_exits_clearly_without_api_key`,
@@ -1290,7 +1290,7 @@ por el autor
   antes de D11. Cada cubeta `_add` y `_remove` cuenta como clave propia. Si alguna clave se
   repite, o si traen `depends_on` distintos (D35), sigue la pregunta de D11. Sin nada
   pendiente, o con otra tool en el turno, D11 no cambia: dos tickets pedidos no se vuelven
-  uno. La implementa la tarea 08; hasta entonces `core/turn.py` (`_decide`) aplica D11 tal
+  uno. La implementa la tarea 08 [corregido en D42: la 08b]; hasta entonces `core/turn.py` (`_decide`) aplica D11 tal
   como está escrita.
 - **Motivo:** en la fase 0, `L4` ("Quita a Juan y agrega a Ana", con la reunión con Juan
   pendiente) trajo las cubetas correctas partidas en dos operaciones de `schedule_meeting`
@@ -1306,7 +1306,7 @@ por el autor
   descartada fuera de esta rama. El texto de D11 no se edita.
 - **Pendiente** (para la brief 08): si las claves se cuentan después del filtro del registro
   (el `L4` medido trae `"message": null` en las dos operaciones); cómo llega `depends_on` a la
-  fusión, porque `_filter_by_registry` (`core/turn.py`) hoy lo descarta; y si una candidata de
+  fusión, porque `_filter_by_registry` (`core/turn.py`) hoy lo descarta [resuelto en D42]; y si una candidata de
   una aclaración cuenta como tool pendiente.
 
 **D34 · Tarea 10c: cinco llamadas propuestas y el umbral de F0.1** (2026-11-17) · autodecidida
@@ -1434,7 +1434,7 @@ orquestador; revisable
 - **Pendiente:** "agregar uno que ya está" contra la base del turno no tiene test (revisión de
   la tarea 07, ronda 3, hallazgo 1); lo cierra la tarea 08. Por la regla 9 de D4, si el modelo
   llena `attendees` y `attendees_add` con el mismo nombre en un flujo nuevo, la respuesta dirá
-  que ya estaba aunque no había nada guardado.
+  que ya estaba aunque no había nada guardado. [resuelto en D42]
 
 **D38 · Fusión: un nombre igual al guardado pero no escrito en el mensaje se rechaza**
 (2026-11-17) · autodecidida por el orquestador; revisable
@@ -1458,3 +1458,120 @@ orquestador; revisable
   tareas 09b y 10a (caso G) lo tienen en cuenta. Vale mientras `last_question` no lleve valores
   (D2, D14): si la 09b guarda ahí la confirmación de D7.1 con los valores normalizados, el
   modelo los vería y podría repetirlos.
+
+**D39 · Fusión en el turno: cada `fill` se muestra antes de la pregunta** (2026-11-17) ·
+decidida por el autor
+
+- **Decisión:** R2 y la rama *Misma tool* de D3 muestran cada `fill` antes de la pregunta,
+  igual que un `overwrite` o un `clear` ("Anoté la descripción: el servidor está caído."). R2
+  fusiona contra un registro vacío (D4 regla 4), así que todo lo que trae es `fill`.
+  `last_question` sigue siendo solo la pregunta (D17), sin esas líneas ni valores (D2, D14).
+  Respuesta del autor a la brief 08, opción (a).
+- **Motivo:** es la lectura literal de D4 regla 9 ("se muestra cada cambio"), y la regla 8
+  cuenta `fill` como cambio. En el caso A muestra que solo se extrajo la descripción (TASK.md
+  líneas 302-304); en el caso B, que se incorporó lo nuevo (líneas 327-331).
+- **Lo que ve el usuario:** una línea por campo recibido antes de la pregunta, desde el primer
+  mensaje. No cambia cuándo se ejecuta nada ni qué se guarda.
+- **Precisa D4 y D19:** la regla 9 de D4 vale también para R2, no solo para lo que llega con
+  algo pendiente; y con una solicitud completa, la plantilla provisional de D19 va después de
+  las líneas `fill`. El texto de D4 y de D19 no se edita.
+- **Descartada:** que R2 muestre solo notas y rechazos, y que los `fill` se vean en *Misma
+  tool* y en la confirmación (D7.1).
+- **Lo prueban:** `test_same_tool_merges_and_asks_for_the_rest`, `test_case_b_until_complete`,
+  `test_new_flow_note_is_true` y `test_case_a_creates_pending_and_asks_for_missing`.
+
+**D40 · Con algo pendiente, un turno sin operaciones es *Misma tool*** (2026-11-17) · decidida
+por el autor
+
+- **Decisión:** con un registro pendiente, `provide_info` o `request_action` sin ninguna
+  operación entra por la rama *Misma tool* de D3 (paso 3): la fusión no recibe nada, el estado
+  no cambia y se repite la pregunta pendiente. Respuesta del autor a la brief 08, opción (a).
+- **Motivo:** es D3 al pie de la letra ("todas las operaciones del turno son de tools
+  pendientes" se cumple con ninguna), y es lo que D9 (*Caso H*) pide para un mensaje que no
+  aporta nada (TASK.md líneas 145 y 447).
+- **Lo que ve el usuario:** la pregunta pendiente en vez de la plantilla provisional. No cambia
+  cuándo se ejecuta nada ni qué se guarda.
+- **Precisa D3:** la rama *Misma tool* (paso 3) incluye el turno sin operaciones. El texto de
+  D3 no se edita.
+- **Descartada:** dejar la plantilla provisional y que lo decida la tarea 12.
+- **Lo prueba:** `test_pending_without_operations_repeats_the_question`.
+
+**D41 · Precisa D10: con algo pendiente, una solicitud que el filtro descarta lleva la línea de
+D10** (2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** si el filtro del registro descartó alguna operación y hay un registro
+  pendiente, la respuesta antepone la línea fija de D10 ("Parte de tu solicitud no corresponde a
+  ninguna de mis herramientas.") aunque no quede ninguna operación. Con `A1` pendiente y solo
+  una tool fuera del catálogo, el turno entra por *Misma tool* sin operaciones (D40): línea de
+  D10 y la pregunta pendiente, con el estado intacto. Sin nada pendiente no cambia: R1 responde
+  con las capacidades, sin la línea.
+- **Cambia lo que ve el usuario:** suma una línea a la respuesta en un caso que D10 no cubría
+  ("queda otra operación" o "no queda nada" sin pendiente). Por eso queda a la vista del autor
+  como revisable, aunque la regla del encabezado reserva al autor ese tipo de decisión.
+- **Motivo:** D10 descartó que una tool desconocida se descarte en silencio (el usuario no sabe
+  que parte de su solicitud se ignoró). La opción (a) de D40 cubre un turno que el intérprete
+  devuelve sin operaciones, no uno cuyas operaciones filtró el registro (TASK.md líneas 107 y
+  128-137). Should-fix 1 de la revisión de la tarea 08, ronda 1.
+- **Alcance real:** hoy la línea precede a cualquier respuesta con algo pendiente, no solo a la
+  pregunta repetida: también a la plantilla provisional (`confirm`, `cancel`, `question` o un
+  turno mixto con una tool fuera del catálogo, y un registro que no está en `collecting`) y a
+  `READY_NOT_AVAILABLE_YET` con un registro completo. Ningún test fija esa parte (revisión de la
+  tarea 08, ronda 2, nota 1). Las tareas 10a y 12, que reemplazan esas plantillas, deben
+  decidirla y probarla en vez de heredarla.
+- **Redacción:** "Parte de tu solicitud" es inexacta cuando la única operación del turno era la
+  descartada; se acepta por ahora.
+- **Descartada:** dejar la pregunta pendiente sola, sin aviso (el descarte silencioso que D10
+  descartó).
+- **Lo prueban:** `test_pending_and_unknown_tool_adds_the_d10_line` (también que un turno sin
+  operaciones no lleva la línea) y `test_pending_and_unknown_tool_through_the_node`.
+
+**D42 · Tarea 08: la fusión de D4 conectada al turno** (2026-11-17) · autodecidida por el
+orquestador; revisable
+
+- **Decisión:** `core/turn.py` pasa R2 (contra `{}`) y la rama *Misma tool* (contra el paso de
+  cada tool, D18) por `merge_args`, y `core/replies.py` escribe las líneas de D4 regla 9. Ninguno
+  de estos detalles cambia lo que ve el usuario más allá de D39–D41, así que van en una línea
+  cada uno (regla del autor desde la tarea 07):
+  - *Entradas del turno:* lo que no viene del intérprete llega en `TurnInput` (dataclass
+    congelada); hoy solo `message`, la 09b suma `today` y la 11 `session_id`.
+  - *Texto del mensaje:* el nodo lo toma del `types.Content` que recibe
+    (`workflow/_node_runner_utils.py:136-141`, google-adk 2.14.1) y une sus partes de texto con
+    un espacio; solo se usa para anclar, nunca va al estado ni al log.
+  - *Log (D4 reglas 3 y 8, D24):* todo turno entendido suma, al final y antes de `ambiguity=`,
+    `changes=` (`campo:tipo:anterior->nuevo`, valores en JSON) y `rejected=` (`clave:nombre`),
+    aun vacíos; esas dos claves llevan valores del usuario y la línea ya no se parte por espacios.
+  - *Solo `collecting`:* *Misma tool* exige un registro en `collecting`; los demás estados siguen
+    con la plantilla provisional (10a y 13).
+  - *Sin cambios:* un turno *Misma tool* que no cambia nada devuelve un delta vacío; uno con solo
+    una nota o un rechazo tampoco cambia el estado y muestra esas líneas antes de la pregunta.
+  - *Varios pasos:* `missing` y las preguntas de cada paso se concatenan; la 14a decide esa
+    redacción.
+  - *Redacción:* "Anoté {etiqueta}: {valor}.", "Cambié {etiqueta}: {antes} → {después}.",
+    "Vacié {etiqueta} (antes: {lista}).", "{nombre} ya está en {etiqueta}." y una línea fija de
+    nombre rechazado que no muestra el nombre.
+  - *Nota `add_present`:* en presente, así que también es cierta en un flujo nuevo cuya lista
+    trajo el nombre en este turno.
+  - *Fechas y horas:* se muestran con los componentes tal como llegaron ("día 40, mes 11",
+    "25:90", "las 10"), sin convertir; resolverlas es de D5 (09b).
+  - *Filtro del registro:* `filter_by_registry` pasa a público y conserva `depends_on` (nulo si
+    no vino); R2 ya no filtra por segunda vez.
+  - *Cubetas:* `list_buckets` (`core/registry.py`) da los nombres `_add`/`_remove` a
+    `core/merge.py` y `core/turn.py`; no se aplica al texto del esquema ni de la instrucción,
+    medidos así en D32.
+- **Motivo:** TASK.md líneas 143-145 y 179 piden conservar lo recopilado e incorporar lo nuevo,
+  y la línea 184 no inventar: un flujo nuevo pasa por la misma fusión, así que un nombre que no
+  está escrito en el mensaje nunca entra. El log suma lo que cambió (línea 471).
+- **Precisa D21:** el resto de la línea sigue sin valores; el *Pendiente* de D21 (tareas 19 y
+  20) suma `changes=` y `rejected=`. El texto de D21 no se edita.
+- **Resuelve:** el *Pendiente* de D37 ("agregar uno que ya está" contra la base del turno,
+  con test, y la nota en un flujo nuevo) y la parte de `depends_on` del *Pendiente* de D11.1.
+- **Lo prueban:** `test_r2_anchors_and_merges_a_new_flow`, `test_filter_keeps_depends_on`,
+  `test_changes_are_shown`, `test_repeated_request_changes_nothing`,
+  `test_add_present_is_measured_against_the_turn_base`, `test_show_value_by_kind`,
+  `test_case_d_reply_names_every_component`, `test_same_tool_needs_a_collecting_record`,
+  `test_case_b_through_the_node`, `test_node_passes_the_message_text`,
+  `test_message_text_joins_text_parts` y `test_one_log_line_per_turn`.
+- **Pendiente:** D11.1 sigue sin implementar (tarea 08b): dos operaciones de la tool pendiente
+  siguen con la pregunta de D11. Redacción, sin tarea (revisión de la tarea 08, nota 7): un
+  valor que termina en punto da "..", la nota usa la grafía que llegó y un `relative_days`
+  negativo se muestra "-1 días desde hoy"; la 09a ya tiene el recorte de espacios.
