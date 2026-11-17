@@ -322,7 +322,7 @@ ejecuta una tool o qué se guarda se sigue consultando al autor.
        resuelve a S. Con `confirm`, S debe tener exactamente una tool. Una tool inicia su
        flujo; dos o más forman un plan lineal en el orden de las candidatas, que conserva la
        dependencia que las candidatas elegidas ya traían entre sí (D8 la valida) y no añade
-       ninguna. Los argumentos guardados se fusionan con los nuevos según D4.
+       ninguna [precisado en D82: también infiere la de D8.4]. Los argumentos guardados se fusionan con los nuevos según D4.
     3. `act` es `confirm`, S está vacío, hay exactamente una candidata y `confirms_tool` es
        nulo o la nombra → se resuelve a esa candidata.
     4. [enmendado en D3.1] S contiene una tool que no es candidata y `act` es `request_action`, `provide_info`,
@@ -1027,7 +1027,7 @@ decidida por el autor
   *Lectura de la respuesta*, regla 4), la operación, el plan o la aclaración pendiente se
   archiva como abandonado (D6) y la tabla de reglas corre sobre todas las operaciones del
   turno. Ninguna tool conserva argumentos guardados, aunque ya estuviera pendiente o fuera
-  candidata. Con `reject` o `cancel`, las operaciones de las tools pendientes también pasan a
+  candidata. [enmendado en D3.3] Con `reject` o `cancel`, las operaciones de las tools pendientes también pasan a
   la tabla.
 - **Motivo:** el caso F pide detectar el cambio, no mezclar argumentos e iniciar el flujo
   nuevo (TASK.md líneas 395-417); no pide conservar los de una tool que se repite. Ahorra una
@@ -1035,7 +1035,7 @@ decidida por el autor
   esas dos reglas de D3 no tenían tarea.
 - **Limitación para el README:** "mejor crea un ticket y avísale a Carlos" con una
   notificación pendiente empieza la notificación de cero y vuelve a pedir lo que el mensaje no
-  repite. Con `reject` o `cancel`, una operación de la tool rechazada que el modelo devuelva en
+  repite. [enmendado en D3.3] Con `reject` o `cancel`, una operación de la tool rechazada que el modelo devuelva en
   ese turno inicia un flujo; nada se ejecuta sin la confirmación de D7.1.
 
 **D3.2 · Enmienda a D3: aclaración mínima** (2026-11-17) · decidida por el autor
@@ -1555,7 +1555,7 @@ orquestador; revisable
     una nota o un rechazo tampoco cambia el estado y muestra esas líneas antes de la pregunta.
     [precisado en D57: salvo que el paso del tiempo cambie la validez]
   - *Varios pasos:* `missing` y las preguntas de cada paso se concatenan; la 14a decide esa
-    redacción.
+    redacción. [resuelto en D87]
   - *Redacción:* "Anoté {etiqueta}: {valor}.", "Cambié {etiqueta}: {antes} → {después}.",
     "Vacié {etiqueta} (antes: {lista}).", "{nombre} ya está en {etiqueta}." y una línea fija de
     nombre rechazado que no muestra el nombre.
@@ -1643,7 +1643,7 @@ autodecidida por el orquestador; revisable
     [reemplazado en D47: `awaiting_confirmation`]
   - *Log:* todo turno entendido suma `invalid=campo:causa`, sin valores ni tool, antes de
     `changes=`, aun vacío. Sin la tool, dos pasos con un campo del mismo nombre no se
-    distinguen; lo decide la 14a.
+    distinguen; lo decide la 14a. [resuelto en D87: sigue sin la tool; límite para la 19]
   - *Sin cambios:* un turno *Misma tool* que no cambia nada deja el estado igual (D42) y repite
     las líneas de inválido guardadas y la pregunta.
   - *Resumen del intérprete:* `pending_summary` sigue con sus cuatro claves (D14, D16) y no
@@ -2798,12 +2798,13 @@ autodecidida por el orquestador; revisable
   - *Limitación para las tareas 19 y 20 (AW 1):* un cambio de intención que cae en R3 o R4 archiva
     lo pendiente y responde la línea del descarte y la plantilla provisional, sin crear nada: el
     usuario pierde lo recopilado hasta que la 13 y la 14a reemplacen esa plantilla (revisión de la
-    tarea 12, ronda 1, nota 7, y ronda 3, nota 4). [la parte de R4, resuelta en D77]
+    tarea 12, ronda 1, nota 7, y ronda 3, nota 4). [la parte de R4, resuelta en D77] [la parte
+    de R3, resuelta en D87]
   - *Herencia en Otra tool (tarea 14a):* "ninguna tool conserva argumentos guardados" (D3.1)
     no es observable hoy, porque R2 exige una sola `explicit` y R3/R4 no crean registro; la brief
     de la 14a debe pedir el test (un ticket pendiente con título y un turno con `create_ticket` y
     `send_notification` `explicit` → el paso del ticket del plan sin el título guardado; ronda 1,
-    nota 4).
+    nota 4). [resuelto en D87]
   - *Sin test:* AW 2 solo se vio en sondas de la revisión.
   - *Tamaño:* `core/turn.py` tiene 599 líneas, a una del límite de la brief (tarea 15).
 
@@ -2905,7 +2906,7 @@ orquestador; revisable
 **D76 · Una aclaración resuelta a dos o más tools espera al plan de la 14a** (2026-11-17) ·
 autodecidida por el orquestador; revisable
 
-- **Decisión:** si la regla 2 resuelve a dos o más candidatas, la aclaración queda como estaba
+- **Decisión:** [reemplazado en D82 y D87: forma el plan] si la regla 2 resuelve a dos o más candidatas, la aclaración queda como estaba
   (`state_delta == {}`), la respuesta es `ONE_OPERATION_AT_A_TIME` ("Por ahora puedo atender una
   operación a la vez; ¿cuál necesitas primero?") y la ruta, `clarification:regla_2`. Es
   provisional: la 14a lo reemplaza por el plan lineal de D3 y D8, que hereda las candidatas con su
@@ -2924,7 +2925,7 @@ autodecidida por el orquestador; revisable
   recibe la plantilla, pero TASK.md líneas 344-350 listan "Ambas operaciones" como tercera lectura
   del caso C. La 14a debe conservarlo como criterio propio (`K1` sobre el registro de `C1` forma
   el plan); si la 14a se recorta, la 20 lo lista como limitación (revisión de la tarea 13, ronda
-  1, nota 2).
+  1, nota 2). [resuelto en D87]
 
 **D77 · Regla 4 de la aclaración: la línea del descarte de D64** (2026-11-17) · autodecidida por
 el orquestador; revisable
@@ -2950,7 +2951,7 @@ el orquestador; revisable
   (cierta, pero una segunda redacción del mismo hecho); (c) sin línea, como si nada estuviera
   pendiente.
 - **Resuelve:** la parte de R4 del *Pendiente* de D71 (AW 1); queda R3 (14a; 19 y 20 mientras
-  tanto).
+  tanto). [R3 resuelto en D87]
 - **Lo prueban:** `test_rule_4_is_a_change_of_intention` (los cuatro actos,
   `clarification:regla_4:R2`), `test_rule_4_into_r3_empties_pending` (`clarification:regla_4:R3`)
   y `test_change_of_intention_into_r4_keeps_the_new_candidates` (`other_tool:R4` desde un ticket
@@ -3099,10 +3100,284 @@ revisable
   - *`changes=` en R4 y R5 (nota 4):* dos tools con un campo del mismo nombre no se distinguirían
     en el log; con el catálogo actual no hay colisión. Las tareas 19 y 20 lo dicen junto al
     *Pendiente* de D21, y la 14a lo tiene en cuenta si suma la tool al log (D44, *Log*).
+    [decidido en D87: sin la tool; límite para la 19]
   - *Legibilidad (nota 6):* el nombre de `test_r3_r4_r5_do_not_start_anything_yet` ya no dice lo
     que afirma, y la variable local `chosen` de `answer_rule` comparte nombre con la función
-    `chosen` del módulo (sin efecto).
+    `chosen` del módulo (sin efecto). [el nombre del test, resuelto en D87; `chosen`, tarea 15]
   - *AW 1 en R3 (D71):* un cambio de intención, o una regla 4, que cae en R3 sigue vaciando
-    `pending` (14a; 19 y 20 mientras tanto).
+    `pending` (14a; 19 y 20 mientras tanto). [resuelto en D87]
   - *Tamaño:* `core/turn.py` tiene 600 líneas, justo en el límite de la brief; la 14a no cabe sin
-    partirlo más y su brief debe preverlo (nota 6).
+    partirlo más y su brief debe preverlo (nota 6). [resuelto en D87]
+
+**D82 · Precisa D3 (regla 2): un plan que nace de una aclaración también infiere la dependencia**
+(2026-11-17) · decidida por el autor
+
+- **Decisión:** si la regla 2 de la *Lectura de la respuesta* de D3 resuelve a dos o más
+  candidatas, el plan se ordena e infiere con la misma función que el de R3 y el de un cambio de
+  intención (`plan_order`, `core/plan.py`, D84). Conserva el `depends_on` que las candidatas
+  elegidas guardaron entre sí y, si ninguno queda vigente, aplica la inferencia de D8.4 y D25.
+  D8.4, enmienda posterior del autor, prevalece sobre el "no añade ninguna" de D3 regla 2.
+  Decisión E de la brief 14a, opción (a).
+- **Lo que ve el usuario:** "Crea un ticket para Carlos y quizá avísale" (ticket `explicit`,
+  notificación `plausible`) pregunta; "las dos" forma el plan con el ticket primero, y la
+  confirmación dice "El mensaje llevará al final el número de ticket." (D85) antes del "sí". El
+  turno que resuelve nunca ejecuta (D3, D7.1). En el caso C ("las dos" sobre notificación y
+  reunión) no hay declaración en el registro y nada se infiere.
+- **Motivo:** un plan es un plan, venga de R3, de un cambio de intención o de una aclaración: una
+  regla menos que explicar. El caso E pide transferir el `ticket_id` (TASK.md línea 390), y D8.4
+  ya aceptó que una notificación no relacionada reciba el número, que se ve antes del "sí".
+- **Precisa D3:** la regla 2 lleva la marca; su texto no se edita.
+- **Descartada:** (b) usar solo los `depends_on` guardados en las candidatas (la lectura literal
+  de D3); sin ellos, la notificación no recibiría el número.
+- **Lo prueban:** `test_rule_2_plan_infers_the_declared_dependency`,
+  `test_rule_2_plan_keeps_the_candidates_dependency` y
+  `test_rule_2_plan_ignores_a_dependency_on_a_candidate_not_chosen` (`tests/test_clarification.py`).
+- **Pendiente:** *limitación para las tareas 19 y 20 (revisión de la tarea 14a, ronda 1, nota
+  8):* el `depends_on` que traen las operaciones del turno que responde ("las dos, la
+  notificación después de la reunión") se ignora; solo cuenta el guardado en las candidatas (D3
+  regla 2).
+
+**D3.3 · Enmienda a D3.1: con `reject` o `cancel`, las operaciones de las tools pendientes no pasan
+a la tabla** (2026-11-17) · decidida por el autor
+
+- **Decisión:** en un cambio de intención cuyo `act` es `reject` o `cancel` (D3, *Compuerta de
+  entrada*, *Otra tool*, y *Lectura de la respuesta*, regla 4), las operaciones de las tools que
+  estaban pendientes, o que eran candidatas, se quitan antes de correr la tabla de reglas; solo
+  las de la tool nueva la recorren. Reemplaza la frase de D3.1 "Con `reject` o `cancel`, las
+  operaciones de las tools pendientes también pasan a la tabla" y su limitación, y vuelve a lo
+  que decía D3. El resto de D3.1 sigue: con `request_action` o `provide_info` todo el turno va a
+  la tabla, y ninguna tool conserva argumentos guardados. Respuesta del autor al hallazgo 1 de la
+  revisión de la tarea 14a, ronda 1.
+- **Lo que ve el usuario:** con una reunión pendiente, "Cancela la reunión y crea un ticket para
+  revisar el servidor" responde "No voy a programar una reunión; descarté lo que tenía
+  pendiente.", "Anoté la descripción: revisar el servidor." y la pregunta del ticket. La reunión
+  queda `abandoned` y solo nace el flujo del ticket (`other_tool:R2`). Sin la enmienda, la
+  respuesta negaba la reunión y la volvía a pedir como primer paso de un plan.
+- **Motivo:** RF-02 pide no invocar tools que no corresponden a la intención ni innecesarias
+  (TASK.md líneas 128 y 132), y el caso F, iniciar el flujo nuevo (líneas 415-417). Con los
+  planes de la 14a la tool rechazada se volvía un paso, y al quitar la 14b el freno de D86 un
+  solo "sí" la habría ejecutado.
+- **Dónde vive:** `_change_of_intention` (`core/turn.py`) recibe `act` y quita las operaciones de
+  las tools de `pending["tools"]`, que en una aclaración son las candidatas, así que sirve a las
+  dos ramas. Las líneas 163-165 y 251-254 de la brief 14a describían lo anterior y quedan
+  superadas en ese punto.
+- **Lo prueban:** `test_reject_or_cancel_drops_the_rejected_tool` (`cancel` y `reject`, *Otra
+  tool* y regla 4), las filas de `reject` y `cancel` de
+  `test_reject_or_cancel_with_another_tool_is_a_change_of_intention` (ahora `other_tool:R2` con
+  el ticket solo, más el ejemplo del autor), `test_request_action_with_another_tool_still_takes_the_whole_turn`
+  y `test_cancel_and_another_tool_through_the_node`.
+- **Pendiente:** *limitaciones para las tareas 19 y 20 (revisión de la tarea 14a, ronda 2):*
+  - *Corrección perdida (nota 2):* "No, la reunión es con Ana; y crea un ticket" abandona la
+    reunión y descarta "con Ana"; nada se ejecuta.
+  - *También las `plausible` (nota 3):* se quitan las operaciones de una tool pendiente sea cual
+    sea su `certainty`; con una `plausible` de la reunión pendiente y un ticket `explicit`, el
+    turno cae en R2 con el ticket, no en R4. Sin test.
+  - *Un plan se abandona entero:* con un plan pendiente, un `cancel` que nombra la notificación y
+    trae una reunión `explicit` abandona el ticket y la notificación y solo nace la reunión.
+
+**D83 · Registro de un plan: un paso por tool en orden de ejecución y `depends_on` solo en el que
+depende** (2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** R3, un cambio de intención que cae en R3 y la regla 2 con dos o más candidatas
+  guardan en `pending` el registro de una operación de D18 con un paso por tool, en orden de
+  ejecución, y `tools` en ese mismo orden. Un paso que depende de otro lleva `depends_on` con el
+  nombre de esa tool (la efectiva, también si se infirió); un paso sin dependencia no lleva la
+  clave, así que el registro de R2 no cambia (una operación sola ignora su `depends_on`). La
+  dependencia se fija al armar el plan: *Misma tool*, `reject` con argumentos y `confirm`
+  fusionan `args` y nunca la cambian. El estado no marca que se infirió; solo lo dice el log del
+  turno que arma el plan (D87). Un cierre sin ejecutar guarda los pasos como estaban, con su
+  `depends_on` (D65). Decisión B de la brief 14a (BB).
+- **Lo que se guarda:** con `E1`, `steps: [{tool: "create_ticket", args: {priority: "alta",
+  assignee: "Carlos"}}, {tool: "send_notification", args: {recipient: "Carlos", channel:
+  "email"}, depends_on: "create_ticket"}]`. El plan nace con un `operation_id` nuevo, salvo el de
+  una aclaración, que conserva el suyo (D75).
+- **Motivo:** D18 previó que el plan "solo agrega pasos y `depends_on`", y las dependencias entre
+  operaciones son estado estructurado (TASK.md líneas 212 y 224).
+- **Descartadas:** (b) `depends_on: null` en todo paso, también en R2 (reescribe decenas de
+  aserciones de R2 y de `history` sin que nada lo lea); (c) una clave aparte `links` (dos lugares
+  que deben coincidir con el orden de `steps`).
+- **Lo prueban:** `test_r3_builds_a_plan`, `test_r2_ignores_depends_on`,
+  `test_plan_same_tool_merges_by_step` (`depends_on` intacto) y
+  `test_plan_discard_and_change_of_intention` (`history` con `depends_on`).
+- **Pendiente:** *limitación para las tareas 19 y 20:* "No, avísale antes de crear el ticket" no
+  reordena el plan; el orden solo lo fija el turno que lo arma. Se ve en la confirmación, y
+  cancelar y pedirlo de nuevo lo cambia.
+
+**D84 · Orden del plan: dependencias ignoradas, e inferencia solo si no queda ninguna**
+(2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** `plan_order` (`core/plan.py`) recibe las operaciones, o las candidatas elegidas,
+  con su `depends_on`, y devuelve los pasos en orden de ejecución con su dependencia efectiva y
+  las entradas del log:
+  1. Un `depends_on` cuenta si nombra otra tool del plan; uno que nombra una tool fuera del plan
+     o la propia se ignora y se anota.
+  2. Si los que cuentan forman un ciclo, se ignoran todos los del ciclo y se anotan: el código no
+     elige cuál gana, como D35.
+  3. Si tras eso ningún paso conserva un `depends_on` (uno ignorado cuenta como ausente), cada
+     paso cuya tool declara en el registro recibir el ID de otra tool del plan depende de ella, y
+     se anota como inferido (D8.4, D25).
+  4. Orden: se recorren los pasos en el orden del intérprete (o de las candidatas) y se coloca
+     el primero cuya dependencia ya está colocada o que no tiene; se repite hasta colocarlos
+     todos. Es estable, ordena una cadena de tres llegada al revés y no usa grafo.
+
+  No nombra ninguna tool ni lee el texto del mensaje, un valor o `ambiguity_reason`. Decisión C
+  de la brief 14a (BB).
+- **Lo que ve el usuario:** el orden de los pasos en la confirmación. Con `E1`, el ticket va
+  primero aunque el modelo devuelva las operaciones al revés o sin `depends_on`. Ejecutar en ese
+  orden es la 14b.
+- **Motivo:** RF-09 pide identificar dependencias y fijar un orden (TASK.md líneas 250-252), y
+  el caso E, ejecutar en el orden correcto (línea 388). Un enlace nuevo entre dos tools es un
+  `IdLink` en el registro y ningún código aquí (línea 562).
+- **Precisa D8.1 y D8.4:** D8.1 ignora también un `depends_on` a la propia tool; el "si falta" de
+  D8.4 se lee por plan, no por paso, como dice la fila 14a del backlog ("si ningún paso trae").
+  Los textos no se editan.
+- **Descartadas:** (b) inferir por paso (más fiel al "si falta" de D8.4, contra la fila 14a); (c)
+  mover cada paso detrás del que nombra en una sola pasada (no ordena una cadena de tres llegada
+  al revés).
+- **Lo prueban:** `test_plan_order`, `test_plan_order_keeps_every_other_key`,
+  `test_three_without_dependencies_or_links_keep_the_interpreter_order`,
+  `test_ignored_dependencies`, `test_inferred_dependency`, `test_inference_follows_the_registry`
+  (`tests/test_plan.py`) y `test_inferred_dependency_through_the_node`.
+- **Pendiente:** *limitaciones para las tareas 19 y 20:*
+  - *Inferencia por plan:* "crea un ticket, agenda una reunión después y avísale a Carlos", con
+    la reunión dependiendo del ticket, no pasa el número a la notificación.
+  - *Un `depends_on` invertido manda (revisión de la tarea 14a, ronda 1, nota 6):* si el modelo
+    pone el ticket dependiendo de la notificación, la notificación va primero, nada se infiere y
+    la confirmación no lleva la línea de D85; se ve antes del "sí". La 14b decide si el caso E
+    grabado depende de esto.
+  - *Ciclo declarado (ronda 2, nota 4):* un registro que declare un ciclo de `receives_id` haría
+    fallar `plan_order`; `test_declared_links_never_loop` lo impide en `TOOLS`, y el README de
+    extensión (19) debe decir que una tool nueva pasa por ese test.
+
+**D85 · La confirmación de un plan dice qué campo recibe el número** (2026-11-17) · autodecidida
+por el orquestador; revisable
+
+- **Decisión:** justo después de los valores del paso que depende de la tool de la que su registro
+  dice recibir el ID, la confirmación suma una línea armada del registro: "{Etiqueta del campo}
+  llevará al final el número de {nombre corto de la productora}." (`id_link_line`,
+  `core/replies.py`). Sale en toda confirmación de ese plan, mostrada o repetida (tras un turno
+  sin cambios, una corrección o el freno de D86), y nunca en `last_question` (D43), en una
+  operación sola ni en un paso que depende de otra tool. El hash sigue siendo el de `[{tool,
+  normalized}]` por paso (D7.2): la dependencia no cambia entre la confirmación y el "sí" (D83).
+  Decisión D de la brief 14a (BB).
+- **Lo que ve el usuario:** en el caso E, tras los valores de la notificación ("- El canal:
+  correo"), "El mensaje llevará al final el número de ticket." y después "¿Confirmas que quieres
+  crear un ticket y enviar una notificación? Responde sí o no.".
+- **Motivo:** D8.2 pide que la confirmación del plan diga que se añadirá el número. Armada del
+  registro, ninguna plantilla nombra "ticket" (TASK.md línea 562); con las etiquetas del registro,
+  "Se añadirá … a el mensaje" no es español.
+- **Precisa D8.2:** la redacción de "se añadirá el número de ticket". El texto de D8.2 no se edita.
+- **Descartadas:** (b) la frase de D8.2 como línea fija (nombra "ticket" en una plantilla); (c)
+  meter `depends_on` en el hash (cambia el de todo plan sin proteger nada que pueda cambiar).
+- **Lo prueban:** `test_plan_confirmation_line_and_hash` (también una `send_notification` sola y
+  una que depende de la reunión, sin la línea), `test_plan_same_tool_merges_by_step` y
+  `test_case_e_reaches_the_plan_confirmation`.
+- **Pendiente:** añadir el número al final de `message` al ejecutar es la 14b; hasta entonces el
+  freno de D86 impide que la notificación salga sin él.
+
+**D86 · Un "sí" a un plan de varios pasos no ejecuta nada hasta la 14b** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** con un registro de dos o más pasos en `awaiting_confirmation`, un "sí" que pasa
+  todas las comprobaciones de `_confirm` (D45, D7.4, D4 y el hash de D7.2) no llama a
+  `_run_confirmed`: responde "Todavía no puedo ejecutar varias operaciones juntas; el plan sigue
+  pendiente." (`PLAN_NOT_RUN_YET`) y la confirmación repetida por `_repeat_pending` (D57:
+  reevaluada contra `now`, delta vacío si nada cambió), con la ruta `confirm_plan_provisional`.
+  Un "sí" con otra tool, un veto, una corrección o un hash distinto siguen sus rutas. Una
+  operación sola sigue ejecutando. Es provisional: la 14b lo borra. Decisión F de la brief 14a
+  (BB).
+- **Lo que ve el usuario:** en el caso E, el "sí" recibe esa línea y otra vez la confirmación;
+  ninguna tool corre. Un `confirms_tool` que nombra cualquier tool del plan da lo mismo; uno que
+  nombra una tool fuera del plan da el veto (`confirm_vetoed`).
+- **Motivo:** `_run_confirmed` ya recorre los pasos y corta en el primero que no termina (D63),
+  pero no añade el `ticket_id`: sin el freno, la notificación saldría sin el número que la
+  confirmación de D85 promete (TASK.md líneas 267 y 390). Precedente: las plantillas provisionales
+  que la tarea siguiente quita (D44, D76).
+- **Descartadas:** (b) dejar correr el plan sin el número hasta la 14b; (c) adelantar a la 14a el
+  añadido del `ticket_id`, con su clave de idempotencia.
+- **Lo prueban:** `test_yes_to_a_plan_runs_nothing_yet` (`confirms_tool` nulo,
+  `send_notification` y `create_ticket`), `test_yes_to_a_plan_naming_another_tool_is_vetoed`,
+  `test_case_e_reaches_the_plan_confirmation` y, sin cambios,
+  `test_yes_runs_the_pending_operation_once`.
+- **Pendiente (tarea 14b):** borrar el freno (tres líneas en `_decide`), `PLAN_NOT_RUN_YET` y la
+  ruta, y devolver `test_steps_after_one_that_does_not_complete_never_run`, que hoy llama a
+  `_run_confirmed` directamente, a un "sí" por `handle_turn` (revisión de la tarea 14a, ronda 1,
+  nota 10). La plantilla no llega a los ejemplos.
+
+**D87 · Tarea 14a: el plan en el turno** (2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** R3, *Otra tool* que cae en R3, la regla 4 que cae en R3 y la regla 2 con dos o más
+  candidatas arman el plan con `_start_flow` (`core/turn.py`), que ahora recibe una lista de
+  partes: con una, el registro de R2 de siempre; con dos o más, el orden de D84, cada paso anclado
+  y fusionado contra `{}` o contra lo heredado de su candidata (D4 regla 4), validado, y el
+  registro de D83. Los detalles no cambian lo que ve el usuario, cuándo se ejecuta una tool ni qué
+  se guarda más allá de D82–D86, así que van en una línea cada uno (regla del autor desde la tarea
+  07):
+  - *Declaración (decisión A):* `IdLink(source, field)` y el campo opcional
+    `ToolSpec.receives_id` (`core/registry.py`), puesto solo en `send_notification`
+    (`IdLink("create_ticket", "message")`); el ID es el `result_id_field` de la productora.
+  - *Respuesta:* las líneas "Anoté…" heredadas, paso por paso (D75), después las del turno en
+    orden de pasos (D39), la línea de nombre rechazado y la pregunta o la confirmación.
+  - *`missing` y `last_question` (decisión G):* la concatenación que ya hacía la evaluación:
+    `missing` es la lista plana de campos paso por paso (ticket y reunión pueden repetir `title`)
+    y `last_question`, la pregunta de cada paso incompleto unida por un espacio. D14 no cambia.
+  - *Rutas (decisión H):* R3, `other_tool:R3`, `clarification:regla_2` y
+    `clarification:regla_4:R3` conservan su nombre; el freno de D86 es `confirm_plan_provisional`.
+    Se borra `ONE_OPERATION_AT_A_TIME`.
+  - *Log (decisión H):* clave nueva `depends=` tras `route=`, solo en el turno que arma un plan:
+    primero las ignoradas, en orden de llegada, y después las efectivas, en orden de ejecución
+    (`receptora<productora`, `receptora<productora:inferred`, `paso<nombrado:ignored`; solo
+    nombres de tools). Un plan sin dependencias escribe `depends=` vacío (elección del
+    implementador). `TurnOutcome.depends` la lleva.
+  - *(uu) y nota 4 de D81:* `invalid=` y `changes=` siguen sin la tool; en un plan van en el orden
+    de los pasos, y el único campo compartido del catálogo es `title`. Límite de observabilidad
+    para la 19, junto al *Pendiente* de D21.
+  - *Partición (decisión I):* `core/assessment.py` (`assessment`, `reassessed` y `closing_line`,
+    movidos y públicos; `closing_line` solo suma el `depends_on` de cada paso para D85) y
+    `core/plan.py`; como `core/turn.py` quedaba en 561 líneas, también `core/outcome.py` con
+    `TurnInput` y `TurnOutcome`, que `core/turn.py` reexporta. `core/turn.py` queda en 541 líneas.
+    Ninguno importa ADK.
+  - *Ciclo declarado (ronda 2):* la segunda búsqueda de ciclos de `plan_order`, que solo protegía
+    de un registro con un ciclo de `receives_id`, se quitó; `test_declared_links_never_loop` lo
+    prohíbe en `TOOLS`.
+  - *Fijo `E2`:* la respuesta a la pregunta del caso E con título, descripción y mensaje, sin
+    nombres de persona; `tests/interpretations.py` solo suma líneas.
+  - *Tests reescritos:* `test_r3_r4_r5_do_not_start_anything_yet` pasa a
+    `test_r3_stores_a_plan_and_r4_r5_a_clarification`, `test_rule_4_into_r3_empties_pending` a
+    `test_rule_4_into_r3_stores_the_plan` y `test_rule_2_with_two_tools_waits_for_the_plan` a
+    `test_rule_2_with_two_tools_forms_the_plan`; las filas `other_tool:R3` de
+    `test_reject_or_cancel_with_another_tool_is_a_change_of_intention` dejan un plan (las de
+    `reject` y `cancel`, el ticket solo, D3.3); el `K1` de `test_measured_answers_through_the_core`
+    forma el plan; `test_only_a_closing_writes_history` suma `other_tool:R3`; y
+    `test_steps_after_one_that_does_not_complete_never_run` llama a `_run_confirmed` (D86).
+- **Lo que ve el usuario (casos E, C y F):** el caso E llega a la confirmación del plan: el primer
+  mensaje anota lo dicho y pide en una respuesta el título y la descripción del ticket y el mensaje
+  de la notificación (TASK.md líneas 382-386); el segundo muestra la confirmación de los dos pasos,
+  el ticket primero, con la línea de D85; el "sí" recibe el freno de D86. En el caso C, "las dos"
+  forma el plan con lo ya dicho y pide lo que falta de cada paso (líneas 344-350, con
+  interpretaciones fijas). Un cambio de intención con dos tools forma el plan solo con lo del
+  turno (línea 413). Nada se ejecuta.
+- **Motivo:** RF-01 pide identificar solicitudes de varias operaciones (TASK.md línea 120); RF-09,
+  los pasos 1 a 4 de su flujo (líneas 260-264); RF-07, las tools pendientes y sus dependencias como
+  estado estructurado (líneas 212 y 224); y las preguntas 3 y 10 de §9 (líneas 555 y 562): la tabla
+  cuenta operaciones y el enlace de IDs vive en el registro.
+- **Resuelve:** el *Pendiente* de D76 (caso C, tercera lectura), los de D71 (AW 1 en R3 y
+  *Herencia en Otra tool*), D42 (*Varios pasos*), D44 (*Log*) y, de D81, *AW 1 en R3*, *Tamaño*, el
+  nombre del test de *Legibilidad* y la nota 4 (como límite para la 19).
+- **Lo prueban:** `test_r3_builds_a_plan`, `test_r3_stores_a_plan_and_r4_r5_a_clarification`,
+  `test_other_tool_never_inherits_into_a_plan`, `test_rule_4_into_r3_stores_the_plan`,
+  `test_rule_2_with_two_tools_forms_the_plan`, `test_measured_answers_through_the_core`,
+  `test_id_link_is_declared_in_the_registry`, `test_declared_links_never_loop`,
+  `test_case_e_reaches_the_plan_confirmation` (`route=R3 depends=send_notification<create_ticket`
+  y el mismo `op=` en los tres turnos), `test_case_c_both_through_the_node`,
+  `test_core_imports_no_adk` (con los tres módulos nuevos) y los del juez del caso C, sin cambiar
+  ningún valor esperado.
+- **Pendiente:**
+  - *Limitación para las tareas 19 y 20 (revisión de la tarea 14a, ronda 1, nota 7):* con un plan
+    pendiente, "No, la notificación no" es un `reject` sin argumentos y descarta el plan entero
+    (D7.3); nada se ejecuta.
+  - *Ejecutar el plan (14b):* añadir el `ticket_id` al final de `message`, la clave de
+    idempotencia de cada paso, el reporte de fallo parcial (D8.3), el fijo `E3` y quitar el freno
+    de D86.
+  - *Tarea 15:* (A19), la rama de cuatro candidatas sin test, y la variable local `chosen` de
+    `answer_rule` (D81, *Legibilidad*).
