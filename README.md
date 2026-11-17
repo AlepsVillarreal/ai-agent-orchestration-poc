@@ -41,8 +41,34 @@ uv run python -c "import google.adk; print(google.adk.__version__)"
 
 Para detener Redis: `docker compose down` (los datos se conservan en el volumen `redis-data`; usa `docker compose down -v` para borrarlos).
 
+## Ejecutar el agente (CLI)
+
+Requiere Redis levantado (`docker compose up -d redis`) y `GOOGLE_API_KEY` en `.env`. Cada mensaje llama al modelo de Gemini y consume cuota de la API key.
+
+```bash
+# Conversación interactiva; cada línea es un mensaje. Ctrl+D para salir.
+uv run python -m assistant.cli
+
+# Continuar una conversación guardada en Redis
+uv run python -m assistant.cli --session <ID>
+
+# Mensajes por tubería: cada línea es un mensaje y la salida se lee como transcripción
+printf 'Necesito crear un ticket\n' | uv run python -m assistant.cli
+```
+
+- Sin `--session`, cada ejecución abre una sesión nueva; su id y el comando para continuarla se imprimen en stderr.
+- stdout lleva solo la conversación. Con stdin por tubería, cada línea del usuario se repite como `> …` antes de la respuesta.
+- stderr lleva el aviso de sesión, una línea de log por turno (`assistant.turn`, en formato `clave=valor`) y las trazas de ADK cuando falla el modelo.
+- Al arrancar se comprueba Redis (`REDIS_URL`, por defecto `redis://localhost:6379/0`) y después `GOOGLE_API_KEY`; si algo falla, la CLI sale con código 1 y un mensaje que dice qué hacer.
+- Si el modelo falla (cuota, timeout, red) o su respuesta no se puede leer, el agente responde con una plantilla y no cambia el estado de la conversación.
+
+> **Estado actual:** el agente reconoce la solicitud y pide los datos que faltan (caso A). Todavía no valida, no confirma ni ejecuta herramientas: una solicitud con todos los datos, la continuación de una operación pendiente o una solicitud con varias operaciones o ambigua responden con mensajes provisionales.
+
 ## Tests
 
 ```bash
+docker compose up -d redis   # algunos tests usan Redis
 uv run pytest
 ```
+
+Los tests no llaman al modelo real: usan un modelo falso con respuestas fijas. Si Redis no responde, los tests que lo necesitan fallan con un mensaje que indica cómo levantarlo.

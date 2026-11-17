@@ -944,3 +944,74 @@ autodecidida por el orquestador; revisable
 - **Pendiente:** el test solo usa `question` y `other` sin operaciones; con una operación
   `explicit` nada fija que no se inicie un flujo (revisión de la tarea 03). [resuelto en la
   tarea 03, ronda 2]
+
+**D21 · Log del turno: `ambiguity_reason` tal como lo escribe el modelo** (2026-11-16) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** la línea de log de cada turno (`log_turn`, `assistant/agent.py`, logger
+  `assistant.turn`) suma `ambiguity=<texto>` cuando el intérprete lo trae, sin recortarlo ni
+  filtrarlo. Es texto libre del modelo y puede repetir un nombre o un dato del mensaje; el
+  resto de la línea (`session`, `act`, `ops`, `route`, `error`) no lleva valores ni texto del
+  usuario. Lo prueba `test_one_log_line_per_turn`, que deja fuera esa clave al comprobar que
+  no aparecen "servidor" ni "Carlos".
+- **Motivo:** D2 (*Solo para logs*) manda registrarlo, y el log local es la vía de
+  observabilidad (TASK.md línea 471). Sin él, la prueba de humo de la tarea 06 no tiene cómo
+  leer por qué el modelo vio ambigüedad en el caso C (líneas 338-355).
+- **Descartadas:** quitarlo del log (contradice D2); recortarlo o enmascarar los nombres
+  (exige reconocer nombres en texto libre).
+- **Pendiente:** la documentación de observabilidad (tareas 19 y 20) debe decir que esa clave
+  puede llevar texto del usuario.
+
+**D22 · CLI: las trazas de ADK quedan en stderr** (2026-11-16) · autodecidida por el
+orquestador; revisable
+
+- **Decisión:** la CLI deja el logger raíz en WARNING y `assistant` en INFO, ambos a stderr,
+  y no silencia el logger `google_adk`. El traceback que ADK registra cuando falla el
+  intérprete ("Node execution failed with exception", p. ej. con un 429) sale en stderr
+  aunque el nodo capture el error y responda con la plantilla. stdout lleva solo la
+  conversación.
+- **Motivo:** es el comportamiento que ya observó el spike (D1.1, *Resultado del spike*).
+  Capturar solo stdout basta para que los ejemplos reproducibles salgan limpios (TASK.md
+  línea 526), y la traza conserva el detalle de un fallo del modelo para la tarea 06 (líneas
+  471 y 580).
+- **Descartada:** subir el logger `google_adk` a CRITICAL (esconde fallos útiles).
+- **Pendiente:** revisar la decisión si las tareas 15 o 17 capturan stderr.
+
+**D23 · Redacción de las plantillas de fallo** (2026-11-16) · autodecidida por el
+orquestador; revisable
+
+- **Decisión:** `core/replies.py` define una plantilla por caso de D1.1 (*Fallos*):
+  `NOT_UNDERSTOOD`, "No te entendí; no cambié nada. ¿Puedes decirlo de otra forma?", y
+  `MODEL_UNAVAILABLE`, "El modelo no está disponible ahora; no cambié nada. Intenta de nuevo
+  en un momento." Lo prueba `test_failed_turn_keeps_state` (JSON roto, fuera del esquema,
+  salida vacía, 429 y timeout).
+- **Motivo:** las dos dicen que el estado no cambió, que es lo que garantiza D1.1: el
+  usuario puede repetir sin perder lo recopilado (TASK.md líneas 145 y 580).
+- **Descartada:** una redacción propia para el 429, que D1.1 permite ("puede") y no exige.
+
+**D24 · CLI: sesión, arranque y salida** (2026-11-16) · autodecidida por el orquestador;
+revisable
+
+- **Decisión:** `uv run python -m assistant.cli [--session ID]` (`assistant/cli.py`).
+  - *Sesión:* sin `--session`, una sesión nueva (uuid) por ejecución; su id y el comando
+    para continuarla salen en stderr. `user_id` fijo (`cli`).
+  - *Arranque:* carga `.env`, comprueba Redis (`ping` a `REDIS_URL`, por defecto
+    `redis://localhost:6379/0`) y después `GOOGLE_API_KEY`. Cada fallo sale con un mensaje
+    en stderr, sin traceback, y código 1; el de Redis nunca muestra la contraseña de la URL.
+  - *Salida:* una línea de stdin es un mensaje nuevo y las líneas en blanco se saltan. Con
+    stdin por tubería, cada línea se repite como `> …` antes de la respuesta. Solo se
+    imprimen los eventos con texto cuyo autor no es `interpreter` (D1.1, *Costos aceptados*).
+  - *Log:* la línea de cada turno no lleva valores de argumentos ni el texto del mensaje; la
+    tarea 08 suma los cambios de fusión con sus valores (D4 regla 8).
+
+  Lo prueban `test_chat_prints_only_replies`, `test_cli_exits_clearly_when_redis_is_down`,
+  `test_cli_exits_clearly_without_api_key`,
+  `test_run_creates_a_session_per_run_and_continues_it` y
+  `test_redis_url_in_messages_never_shows_a_password`.
+- **Motivo:** una sesión fija haría que cada ejecución heredara lo pendiente de la anterior
+  y mezclaría los ejemplos reproducibles (TASK.md línea 526); `--session` muestra la
+  continuidad del estado entre procesos (línea 227). Sin comprobar la clave, cada turno
+  respondería "modelo no disponible", que confunde a quien instala (línea 528). Con el eco,
+  la salida por tubería se lee como una transcripción.
+- **Descartadas:** una sesión fija ("default"); dejar que Redis o la clave fallen en el
+  primer turno (la conexión de `RedisSessionService` es perezosa).
