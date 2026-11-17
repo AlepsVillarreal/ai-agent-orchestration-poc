@@ -1734,7 +1734,7 @@ autodecidida por el orquestador; revisable
   líneas 443-449). `_run_confirmed` no corta en un fallo, vacía `pending` sin mirar `success` y
   no captura una excepción de la tool; las tareas 11 y 14b lo cambian antes de un plan de dos
   pasos (TASK.md línea 270; revisión de la tarea 10a, ronda 2, nota 5). Sin `history` (D6) ni
-  respuesta propia del resultado (línea 246): tarea 10b.
+  respuesta propia del resultado (línea 246): tarea 10b. [resuelto en D48 y D49]
 
 **D47 · Tarea 10a: confirmación y "sí" en el turno** (2026-11-17) · autodecidida por el
 orquestador; revisable
@@ -1775,7 +1775,7 @@ orquestador; revisable
   - *Un "sí" que repite un valor guardado* ("Sí, por correo"; "Sí, envíalo a Carlos" con el
     nombre escrito) no es un cambio (D4 regla 5) y cuenta como "sí".
   - *Tras ejecutar:* la respuesta es el `message` del mock, con los valores canónicos ("high",
-    "email"), hasta la 10b.
+    "email"), hasta la 10b. [resuelto en D48]
   - *Fase 0:* `test_the_23_scenarios_of_d2` compara los registros sin `operation_id`, que es
     aleatorio; el resumen no lo muestra, así que los prompts con que se midió D32 no cambian.
   - *Plantillas:* se borra `READY_NOT_AVAILABLE_YET` (D19); un registro `collecting` sin
@@ -1807,3 +1807,108 @@ orquestador; revisable
   (nota 4). En el "sí" que ejecuta, cada paso se valida tres veces (nota 3). `core/turn.py`
   tiene 406 líneas (umbral de la brief: ~350), y `record_tools` y `without_id` están repetidos
   en los tests (nota 6). `reject` y `cancel` (D7.3) son la 12.
+
+**D48 · Respuesta tras ejecutar: una línea de plantilla por paso, con el ID del resultado**
+(2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** tras un "sí" que ejecuta, la respuesta es una línea por paso que escribe
+  `result_line` (`core/replies.py`): "Listo: {done_phrase} {ID}.". El ID se copia tal como lo
+  devolvió la tool, de `result[tool.result_id_field]`, sin suponer su formato. `ToolSpec` gana
+  `done_phrase` ("creé el ticket", "programé la reunión", "envié la notificación"), como
+  `action_phrase` y `short_name` (D3). El `message` del mock ya no se muestra: queda en
+  `history`, dentro de `result` (D49). Opción (a) de la brief 10b.
+- **Lo que ve el usuario:** en el caso G, "Listo: envié la notificación NTF-…" en lugar de
+  "Notificación NTF-… enviada a Carlos por email." (D47, *Tras ejecutar*). Ya no aparecen los
+  valores canónicos ("high", "email"), que el usuario vio en español en la confirmación del turno
+  anterior. No cambia cuándo se ejecuta nada.
+- **Motivo:** el agente debe interpretar los resultados y dar feedback (TASK.md líneas 24 y 246;
+  §6, líneas 497-499). Es una plantilla del núcleo (D2), sin texto de la tool, y la frase y el
+  campo de ID salen del registro, no de un nombre de tool en el código (línea 562). La 14b reusa
+  la línea por paso para informar el resultado de ambas operaciones (línea 392).
+- **Descartadas:** mostrar el `message` del mock con etiquetas en español (el mock tendría que
+  conocer "alta" y "correo": duplicaría `value_labels` o importaría el registro, que ya importa
+  los mocks); la línea más el `message` del mock (repite lo que se acaba de confirmar). Repliegue
+  si se prefiere no sumar una etiqueta: "Listo: {short_name} {ID}.".
+- **Lo prueban:** `test_result_line_per_tool`, `test_result_line_reads_the_registry_id_field`
+  (una tool falsa con `result_id_field` propio), `test_yes_reply_reads_the_result`,
+  `test_case_g_through_the_node` y `test_case_b_through_the_node`.
+- **Pendiente:** "Listo" no mira `success` (D50, *Pendiente*).
+
+**D49 · Forma de `history` y cómo llega al núcleo** (2026-11-17) · autodecidida por el
+orquestador; revisable
+
+- **Decisión:** al ejecutarse, `_run_confirmed` vacía `pending` y agrega a
+  `session.state["history"]` la entrada `{operation_id, status: "completed", steps: [{tool,
+  values, result}]}`, en el orden de los pasos. `values` son los valores normalizados que recibió
+  la tool (" Carlos " → "Carlos", "correo" → "email") y `result` es el dict tal como lo devolvió,
+  `message` incluido. La más nueva va al final y se guardan las últimas `MAX_HISTORY = 10`.
+  `core/history.py` (Python puro) arma la entrada (`closed_entry`) y la lista nueva (`appended`,
+  sin mutar la recibida); los cierres `failed`, `uncertain`, `cancelled` y `abandoned` de las
+  tareas 11 y 12 usarán los mismos ayudantes. El núcleo la recibe como
+  `handle_turn(..., history=())`: el nodo la lee con `ctx.state.get("history") or []` y la lista
+  completa vuelve en el `state_delta` del evento final, como `pending` (D1.1, *Estado*).
+- **Lo que se guarda:** `history` aparece en la sesión de Redis desde el primer "sí" que ejecuta.
+  Ninguna regla la lee (D6): ni la fusión (D4), ni la compuerta (D3), ni `pending_summary`
+  (D14), así que el modelo nunca la ve. El usuario no ve nada de ella.
+- **Motivo:** RF-07 pide mantener el estado de ejecución y los resultados de las tools, y
+  diferenciar el historial conversacional del estado estructurado (TASK.md líneas 220-222 y
+  229): `history` es estado estructurado, no conversación. Un parámetro con nombre deja intactos
+  los tests anteriores y deja la lógica en el núcleo, no en el adaptador (D1.1, *Frontera*).
+- **Precisa D44:** en `pending` los normalizados no se guardan porque pueden cambiar (una fecha
+  relativa); en `history` sí, porque son lo que se ejecutó. El texto de D44 no se edita.
+- **Precisa D42:** `TurnInput` lleva lo que no es estado (`message`, y luego `today` y
+  `session_id`); `pending` y `history`, que sí lo son, llegan como parámetros propios de
+  `handle_turn`. El texto de D42 no se edita.
+- **Descartadas:** meter `history` en `TurnInput` (D42 lo reservó para lo que no es estado); que
+  el nodo agregue la entrada (lógica en el adaptador).
+- **Lo prueban:** `test_confirmed_operation_goes_to_history` (también con " Carlos "),
+  `test_history_keeps_the_last_ten`, `test_only_a_confirmed_yes_writes_history`,
+  `test_history_accumulates_and_is_never_read` (el nodo pasa lo guardado y el modelo no lo ve),
+  `test_case_b_through_the_node`, `test_case_g_through_the_node` y
+  `test_confirmed_operation_is_gone_after_reload` (una instancia nueva de `RedisSessionService`
+  recarga `history`; línea 227).
+- **Pendiente:** el `completed` no mira `success` (D50, *Pendiente*).
+
+**D50 · Tarea 10b: resultado, `history` y log** (2026-11-17) · autodecidida por el orquestador;
+revisable
+
+- **Decisión:** la 10b cierra la ejecución confirmada con D48 y D49. Los demás detalles no
+  cambian lo que ve el usuario, cuándo se ejecuta una tool ni qué se guarda, así que van en una
+  línea cada uno (regla del autor desde la tarea 07):
+  - *Log (precisa D21 y D42):* un turno que ejecuta suma `results=tool:ID` (uno por paso,
+    separados por coma) después de `route=`; solo aparece si corrió una tool. El ID lo da la
+    tool, no el usuario, y se escribe como `str(result[id_field])`. La 11 le suma el estado y la
+    clave.
+  - *`TurnOutcome`:* gana `results: list[tuple[str, str]]`, `(tool, ID)` por paso, para el log.
+  - *Fijo `B4`:* "Sí, créalo" como `confirm` sin operaciones y con `confirms_tool="create_ticket"`,
+    igual que `G2` volvió del modelo real (D32); así el caso B termina con su propio "sí" por el
+    nodo y prueba que D7.4 deja pasar la tool correcta. Solo se añade esa entrada a
+    `tests/interpretations.py`.
+  - *`values`:* es el mismo dict que recibió la tool; los mocks no lo mutan.
+  - *`result`:* se guarda tal cual; tiene que poder serializarse en JSON (la 11 puede vigilarlo).
+  - *Tools falsas de los tests:* sus `done_phrase` son "hice algo", "pedí la revisión" y
+    "reservé la sala".
+- **Motivo:** la línea de log es la vía de observabilidad que TASK.md línea 471 pide justificar,
+  y le faltaba qué se ejecutó; el caso B ejecuta solo con todo completo y tras su "sí" (línea
+  335; D7.1, F4).
+- **Lo prueban:** `test_case_g_through_the_node` (`route=confirmed`, `op=` y
+  `results=send_notification:<ID>` en la línea de log), `test_case_b_through_the_node` (`B4`;
+  `create_ticket` corre una vez), `test_fixed_interpretations_validate` y
+  `test_no_turn_executes_a_tool` (ambos recorren `B4` por `FIXED`).
+- **Pendiente:**
+  - *`success` (should-fix 1 de la revisión de la tarea 10b, ronda 1):* `_run_confirmed` no lee
+    `success`. Un resultado con `success: false` respondería igual "Listo" (con un ID nulo,
+    "Listo: … None.") y se guardaría como `completed`; un resultado sin el campo de ID lanza
+    `KeyError` y no escribe ni `pending` ni `history`. Con los mocks no se alcanza (siempre
+    devuelven `success: True`). Lo resuelve la 11: el fallo de ejecución, el plan que se
+    detiene y el registro de ejecuciones (D8.3, D9, D9.3; TASK.md líneas 24-25, 246 y 270). La
+    frase de defensa de la brief 10b ("el código lee `success`") no es cierta en la 10b: hoy lee
+    solo el ID que declara el registro.
+  - *Excepción de una tool:* si una tool lanza, ni `pending` ni `history` se escriben y, con dos
+    pasos, el primero ya habría corrido (líneas 270 y 286). Hoy no se alcanza (un solo paso: D11,
+    R3); las tareas 11 y 14b escriben el cierre parcial con `closed_entry` antes de permitir un
+    plan de dos pasos (revisión de la tarea 10b, ronda 2, nota 5).
+  - *ID del log:* `results` lee el ID por segunda vez en `_run_confirmed` y ningún test con una
+    tool falsa lo fija (ronda 2, nota 1); puede ir con la 11, que toca ese bucle.
+  - *Tamaño:* `core/turn.py` tiene 425 líneas (ronda 2, nota 2).
+  - Sin idempotencia tras ejecutar (D46, *Pendiente*; tarea 11).
