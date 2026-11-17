@@ -535,7 +535,7 @@ ejecuta una tool o qué se guarda se sigue consultando al autor.
 - **Decisión:** el validador es Python puro, corre después de la fusión de D4 y declara cada
   regla por tipo de campo en el registro. Devuelve faltantes, inválidos con su causa y los
   valores normalizados que muestra la confirmación (D7). [`date` y `time` sin regla hasta la
-  09b; ver D44]
+  09b; ver D44] [reglas de `date` y `time` en D56]
   - *D5.1 · Fechas:* `relative_days` y `weekday` se resuelven contra "hoy" (un día de la
     semana es su próxima ocurrencia, sin contar hoy); sin año, la próxima ocurrencia de ese
     día y mes; sin mes, el campo falta y se pregunta; un día que no existe es inválido.
@@ -771,7 +771,8 @@ ejecuta una tool o qué se guarda se sigue consultando al autor.
 **D7.4 · Enmienda a D7: veto de `confirms_tool`** (2026-11-16)
 
 - **Decisión:** un `confirm` cuyo `confirms_tool` nombra una tool distinta de la pendiente no
-  ejecuta ni cambia nada, y vuelve a mostrar la confirmación pendiente. En un plan,
+  ejecuta ni cambia nada, y vuelve a mostrar la confirmación pendiente [precisado en D57: nada
+  de lo que trae el mensaje; el paso del tiempo sí puede cambiar la validez]. En un plan,
   `confirms_tool` puede nombrar cualquier tool del plan. Nulo no bloquea (D2).
 - **Motivo:** el "sí" vale solo para la operación pendiente identificada y nunca autoriza otra
   tool (TASK.md líneas 282-284). Repetir la confirmación muestra qué está pendiente sin perder
@@ -1488,7 +1489,8 @@ por el autor
 
 - **Decisión:** con un registro pendiente, `provide_info` o `request_action` sin ninguna
   operación entra por la rama *Misma tool* de D3 (paso 3): la fusión no recibe nada, el estado
-  no cambia y se repite la pregunta pendiente. Respuesta del autor a la brief 08, opción (a).
+  no cambia y se repite la pregunta pendiente [precisado en D57: salvo que el paso del tiempo
+  cambie la validez]. Respuesta del autor a la brief 08, opción (a).
 - **Motivo:** es D3 al pie de la letra ("todas las operaciones del turno son de tools
   pendientes" se cumple con ninguna), y es lo que D9 (*Caso H*) pide para un mensaje que no
   aporta nada (TASK.md líneas 145 y 447).
@@ -1536,7 +1538,8 @@ orquestador; revisable
   de estos detalles cambia lo que ve el usuario más allá de D39–D41, así que van en una línea
   cada uno (regla del autor desde la tarea 07):
   - *Entradas del turno:* lo que no viene del intérprete llega en `TurnInput` (dataclass
-    congelada); hoy solo `message`, la 09b suma `today` y la 11 `session_id`.
+    congelada); hoy solo `message`, la 09b suma `today` y la 11 `session_id`. [precisado en
+    D58: la 09b suma `now`, con fecha y hora]
   - *Texto del mensaje:* el nodo lo toma del `types.Content` que recibe
     (`workflow/_node_runner_utils.py:136-141`, google-adk 2.14.1) y une sus partes de texto con
     un espacio; solo se usa para anclar, nunca va al estado ni al log.
@@ -1547,6 +1550,7 @@ orquestador; revisable
     con la plantilla provisional (10a y 13). [`awaiting_confirmation` resuelto en D47]
   - *Sin cambios:* un turno *Misma tool* que no cambia nada devuelve un delta vacío; uno con solo
     una nota o un rechazo tampoco cambia el estado y muestra esas líneas antes de la pregunta.
+    [precisado en D57: salvo que el paso del tiempo cambie la validez]
   - *Varios pasos:* `missing` y las preguntas de cada paso se concatenan; la 14a decide esa
     redacción.
   - *Redacción:* "Anoté {etiqueta}: {valor}.", "Cambié {etiqueta}: {antes} → {después}.",
@@ -1616,8 +1620,9 @@ autodecidida por el orquestador; revisable
   fusión de *Misma tool*. Solo la última línea toca lo que ve el usuario, y solo en redacción,
   así que van en una línea cada una (regla del autor desde la tarea 07):
   - *Registro:* `pending` gana `invalid: [{tool, field, cause}]`, sin valores; `missing` sigue
-    siendo solo lo ausente; `status` sigue en `collecting`. Los normalizados y `unchecked` no se
-    guardan: se recalculan (la 10a, para mostrar y para el hash de D7.2).
+    siendo solo lo ausente [precisado en D56: también una fecha u hora incompleta]; `status`
+    sigue en `collecting`. Los normalizados y `unchecked` no se guardan: se recalculan (la 10a,
+    para mostrar y para el hash de D7.2).
   - *Causas:* `not_allowed` (una `word` sin sinónimo, "urgente"), `out_of_range` (un `int` fuera
     de `int_range`) y `wrong_type` (cualquier tipo equivocado; un `bool` no es `int`, como D13).
   - *Reglas:* una por `FieldKind` en `RULES`; `text` y `person` recortan espacios, `word` da el
@@ -1629,7 +1634,8 @@ autodecidida por el orquestador; revisable
     tipo en `core/validation.py`; el registro declara el tipo y sus parámetros.
   - *Fechas y horas:* presentes, quedan `unchecked`, nunca válidas, hasta la 09b; un paso
     completo con una de ellas deja `last_question` nulo y cierra con la plantilla provisional
-    "Tengo los datos; todavía no puedo validar fechas ni horas en esta versión.".
+    "Tengo los datos; todavía no puedo validar fechas ni horas en esta versión.". [resuelto en
+    D56 y D58]
   - *Completo y válido:* `last_question` nulo y la plantilla de D19; nada se ejecuta (D7.1).
     [reemplazado en D47: `awaiting_confirmation`]
   - *Log:* todo turno entendido suma `invalid=campo:causa`, sin valores ni tool, antes de
@@ -1673,17 +1679,20 @@ autodecidida por el orquestador; revisable
   " Carlos " (nota 3) [resuelto en D46 y D47]. El
   caso D sigue sin cumplirse hasta la 09b ("40 de noviembre a las 25:90" se anota y no se
   reporta; TASK.md líneas 159, 163 y 365-371), que además quita el `validate` repetido de
-  `_closing_line`. `test_complete_meeting_does_not_reach_confirmation` solo puede fallar desde
-  la 10a: hoy nada crea `awaiting_confirmation` (ronda 1, nota 3).
+  `_closing_line` [resuelto en D56 y D58]. `test_complete_meeting_does_not_reach_confirmation`
+  solo puede fallar desde la 10a: hoy nada crea `awaiting_confirmation` (ronda 1, nota 3).
+  [reemplazado en D58 por `test_meeting_through_the_node`]
 
 **D45 · Un "sí" que trae otra tool, o del que el filtro descartó algo, no ejecuta** (2026-11-17)
 · decidida por el autor
 
 - **Decisión:** con un registro pendiente (`collecting` o `awaiting_confirmation`), un `confirm`
   que trae una operación de una tool que no está pendiente, con cualquier `certainty`, o del que
-  el filtro del registro descartó alguna operación (D10), no ejecuta ni cambia nada: repite la
-  confirmación o la pregunta pendiente, con la línea fija de D10 delante si el filtro descartó
-  algo. Es el mismo trato que el veto de D7.4, y se evalúa antes que él y antes de la fusión.
+  el filtro del registro descartó alguna operación (D10), no ejecuta ni cambia nada [precisado
+  en D57: nada de lo que trae el mensaje; el paso del tiempo sí puede cambiar la validez]:
+  repite la confirmación o la pregunta pendiente, con la línea fija de D10 delante si el filtro
+  descartó algo. Es el mismo trato que el veto de D7.4, y se evalúa antes que él y antes de la
+  fusión.
   Respuesta del autor a la brief 10a, opción (a).
 - **Motivo:** un "sí" nunca autoriza otra tool (TASK.md líneas 282-284), y un "sí" que mezcla
   otra solicitud ya no responde solo a lo que se mostró: el mismo motivo por el que un turno
@@ -1772,6 +1781,7 @@ orquestador; revisable
   - *Pregunta guardada:* "¿Confirmas que quieres {acciones}? Responde sí o no.", sin valores
     recopilados ni permitidos (D43, D38).
   - *Hash distinto y válido:* la confirmación vuelve a mostrarse sin una línea que diga por qué.
+    [reemplazado en D55: una línea fija lo dice]
   - *Un "sí" que repite un valor guardado* ("Sí, por correo"; "Sí, envíalo a Carlos" con el
     nombre escrito) no es un cambio (D4 regla 5) y cuenta como "sí".
   - *Tras ejecutar:* la respuesta es el `message` del mock, con los valores canónicos ("high",
@@ -1780,7 +1790,7 @@ orquestador; revisable
     aleatorio; el resumen no lo muestra, así que los prompts con que se midió D32 no cambian.
   - *Plantillas:* se borra `READY_NOT_AVAILABLE_YET` (D19); un registro `collecting` sin
     pregunta solo existe con una fecha u hora sin regla (`DATE_TIME_NOT_CHECKED_YET`, hasta la
-    09b).
+    09b). [borrada en D58]
 - **Motivo:** RF-08 y RF-10 piden ejecutar solo con argumentos completos, validados y
   autorizados, y atar el "sí" a la operación pendiente identificada (TASK.md líneas 233-243 y
   276-286); el caso G confirma antes de ejecutar sin volver a pedir lo dado (líneas 420-438), y
@@ -1802,11 +1812,11 @@ orquestador; revisable
   log) y `test_case_b_through_the_node` (termina con un "sí" que ejecuta `create_ticket`).
 - **Pendiente:** "una nota nunca ejecuta" se prueba sobre una reunión en `collecting`; el caso
   que importa (una reunión en confirmación y "sí, y quita a Ana") existe desde la 09b y va como
-  criterio de su brief (revisión de la tarea 10a, ronda 2, nota 2). La 09b decide si un hash
-  distinto con valores válidos ("mañana" que cambió de día) lleva una línea que lo explique
-  (nota 4). En el "sí" que ejecuta, cada paso se valida tres veces (nota 3). `core/turn.py`
-  tiene 406 líneas (umbral de la brief: ~350), y `record_tools` y `without_id` están repetidos
-  en los tests (nota 6). `reject` y `cancel` (D7.3) son la 12.
+  criterio de su brief (revisión de la tarea 10a, ronda 2, nota 2) [resuelto en D58]. La 09b
+  decide si un hash distinto con valores válidos ("mañana" que cambió de día) lleva una línea
+  que lo explique (nota 4) [resuelto en D55]. En el "sí" que ejecuta, cada paso se valida tres
+  veces (nota 3). `core/turn.py` tiene 406 líneas (umbral de la brief: ~350), y `record_tools` y
+  `without_id` están repetidos en los tests (nota 6). `reject` y `cancel` (D7.3) son la 12.
 
 **D48 · Respuesta tras ejecutar: una línea de plantilla por paso, con el ID del resultado**
 (2026-11-17) · autodecidida por el orquestador; revisable
@@ -1857,8 +1867,8 @@ orquestador; revisable
 - **Precisa D44:** en `pending` los normalizados no se guardan porque pueden cambiar (una fecha
   relativa); en `history` sí, porque son lo que se ejecutó. El texto de D44 no se edita.
 - **Precisa D42:** `TurnInput` lleva lo que no es estado (`message`, y luego `today` y
-  `session_id`); `pending` y `history`, que sí lo son, llegan como parámetros propios de
-  `handle_turn`. El texto de D42 no se edita.
+  `session_id`) [`today` es `now`; ver D58]; `pending` y `history`, que sí lo son, llegan como
+  parámetros propios de `handle_turn`. El texto de D42 no se edita.
 - **Descartadas:** meter `history` en `TurnInput` (D42 lo reservó para lo que no es estado); que
   el nodo agregue la entrada (lógica en el adaptador).
 - **Lo prueban:** `test_confirmed_operation_goes_to_history` (también con " Carlos "),
@@ -2093,3 +2103,206 @@ orquestador; revisable
     uniera solo el subgrupo disjunto no la vería nadie (nota 1). La operación vacía de *Lo que ve
     el usuario* tampoco tiene test (nota 3).
   - *Tamaño:* `core/turn.py` tiene 471 líneas (D50, *Pendiente*).
+
+**D55 · Hash distinto con el registro todavía válido: una línea fija lo dice** (2026-11-17) ·
+decidida por el autor
+
+- **Decisión:** si al llegar un "sí" el hash de los valores que se mostrarían ahora no coincide
+  con el guardado (D7.2) y el registro sigue completo y válido, la respuesta antepone a la
+  confirmación repetida la línea fija "Los datos cambiaron desde que te los mostré; revísalos
+  antes de confirmar." (`DATA_CHANGED_LINE`, `core/replies.py`). Solo en ese camino
+  (`route=confirm_hash_changed` con el registro en `awaiting_confirmation`); si el registro
+  vuelve a `collecting`, la línea de inválido ya lo explica y no se añade. Nada corre: el "sí"
+  siguiente ejecuta los valores nuevos. Respuesta del autor a la brief 09b, opción (a) (nota
+  (ddd)).
+- **Motivo:** desde la 09b el caso es real: una reunión "mañana" confirmada antes de medianoche
+  y un "sí" después, o "el 17 de noviembre" sin año, que tras medianoche pasa al año siguiente
+  (D5.1). El usuario sabe por qué se repite y mira la fecha antes del segundo "sí", que se ata a
+  lo mostrado (TASK.md líneas 276-284).
+- **Lo que ve el usuario:** una línea más antes de la confirmación repetida, solo en ese caso. No
+  cambia cuándo se ejecuta nada ni qué se guarda.
+- **Precisa D47:** su línea *Hash distinto y válido* ("sin una línea que diga por qué") queda
+  reemplazada. El texto de D47 no se edita.
+- **Descartada:** (b) sin línea, como D47, y listarlo como límite en la tarea 19.
+- **Lo prueban:** `test_tomorrow_changes_the_hash_on_the_next_day` (la línea y su texto literal;
+  el segundo "sí" corre una vez con `2026-11-19`), `test_hash_mismatch_asks_again` (cambiado:
+  ahora espera la línea) y `test_time_that_passed_while_pending` (vuelve a `collecting` sin la
+  línea).
+- **Pendiente:** *rutas que repiten (limitación para las tareas 19 y 20):* al día siguiente de
+  un "mañana", repetir el mensaje o un "sí" que D45 o D7.4 rechazan muestra la confirmación con
+  la fecha nueva y guarda el hash nuevo (D57), sin esta línea; el "sí" siguiente ejecuta la
+  fecha que se mostró (D7.2). Revisión de la tarea 09b, ronda 2, nota 6, y ronda 3, nota 2.
+
+**D56 · Reglas de fecha y hora: lecturas de D5** (2026-11-17) · autodecidida por el
+orquestador; revisable
+
+- **Decisión:** `core/validation.py` gana las reglas `date` (`_date`) y `time` (`_time`) de
+  D5.1, D5.1b, D5.1c y D5.2, una por `FieldKind` como en D44: convierten los componentes que
+  copió el modelo a `YYYY-MM-DD` y `HH:mm` contra el `now` del turno (D58) y dan una causa por
+  problema. Lo que D5 no fija va en una línea cada uno (decisiones B, C y D de la brief 09b, sus
+  "lecturas de D5" y lo que fijaron las revisiones):
+  - *Orden de la fecha:* ilegible → `wrong_type`; día fuera de 1–31 o mes fuera de 1–12 →
+    `nonexistent`, aun sin la otra parte (`{day: 40}` solo); calendario incompleto → faltante;
+    cada forma que fija un día da el suyo; formas que no coinciden → `mismatch`; antes de hoy →
+    `past`.
+  - *Incompleta es faltante (precisa D44):* día sin mes, mes sin día o año sin los dos van a
+    `missing`, no a `invalid`, igual que una hora sin `hour` (D5.1 y D5.2: "el campo falta");
+    `missing` ya no es solo lo ausente. Ni el mes ni la hora se completan (TASK.md línea 184).
+  - *Día sin mes junto a un día de la semana (B):* "el viernes 27" deja la fecha incompleta y se
+    pregunta; "el viernes 27 de noviembre" sí se comprueba. Descartadas: buscar la próxima fecha
+    con ese número y ese día; comparar con el próximo viernes.
+  - *Próxima ocurrencia:* día y mes sin año → este año si (mes, día) ≥ hoy y, si no, el
+    siguiente; hoy cuenta (hoy no es pasado, D5.1b). Un día de la semana solo → de 1 a 7 días
+    adelante, sin contar hoy (D5.1).
+  - *Día de la semana con otra forma (D5.1c):* se comprueba contra el día que fija la otra
+    forma, no se resuelve aparte ("mañana viernes" un martes → `mismatch`).
+  - *Día que el año no tiene:* el 31 de abril o el 29 de febrero de un año no bisiesto →
+    `nonexistent`.
+  - *Enteros fuera del calendario:* un `relative_days` o un `year` que `date` no alcanza
+    (`10**7`, `10**10`, `10000`) → `nonexistent`, nunca una excepción; el esquema acepta
+    cualquier entero (revisión de la tarea 09b, ronda 1, should-fix 2, y ronda 2, should-fix 1).
+  - *Día de la semana desconocido:* `wrong_type` ("juernes"); la tabla tiene español e inglés y
+    no distingue acentos ni mayúsculas.
+  - *Hora:* sin `hour` → faltante; sin `minute` → `:00`; `hour` fuera de 0–23 o `minute` fuera
+    de 0–59 → `bad_format`; una hora de 1 a 12 se toma como llegó (D5.2).
+  - *Fecha y hora juntas en el pasado (D):* solo puede pasar con la fecha de hoy (una anterior
+    ya es `past`). Se reporta `time` con `past`, sale de `normalized` y la pregunta pide la hora;
+    la fecha válida se conserva. El instante exacto de `now` no es pasado ("hoy a las 9" con
+    `now` a las 09:00 es válido). Descartada: marcar los dos campos (pide otra vez una fecha
+    válida).
+  - *Redacción (C):* `nonexistent` → "{Etiqueta} indicada no existe."; `bad_format` →
+    "{Etiqueta} está fuera del formato válido."; `past` → "{Etiqueta} indicada ya pasó.";
+    `mismatch` → "Las partes de {etiqueta} que indicaste no dan el mismo día."; `wrong_type`
+    sigue con "No pude leer {etiqueta}.". Las dos primeras son las frases de TASK.md línea 198;
+    "indicada" concuerda con "la fecha" y "la hora", las únicas etiquetas con esas causas.
+  - *Caso D (C):* la respuesta no añade la cabecera "Hay un problema con la fecha y la hora." ni
+    cambia la pregunta por "¿Qué fecha y hora deseas utilizar?" (TASK.md línea 198): la
+    estructura la fijan D43 y D17, con líneas de inválido y una pregunta por etiquetas que nombra
+    también los tres faltantes.
+- **Lo que ve el usuario:** el caso D (TASK.md líneas 361-371) responde "Anoté la fecha: día
+  40, mes 11.", "Anoté la hora: 25:90.", "La fecha indicada no existe.", "La hora está fuera del
+  formato válido." y la pregunta, que nombra el título, la fecha, la hora, la duración en minutos
+  y los asistentes; nada se ejecuta. Una reunión completa y válida llega a la confirmación con
+  la fecha ISO y la hora `HH:mm`.
+- **Motivo:** RF-04 pide validar formatos, restricciones de negocio y coherencia de forma
+  determinística (TASK.md líneas 159-168), y §2.1 fija `YYYY-MM-DD` y `HH:mm` (líneas 71-72);
+  RF-05 y RF-06, no inventar e identificar el problema (líneas 184 y 186-200). Las reglas leen
+  tipos, nunca nombres de tool ni de campo (línea 562).
+- **Precisa D5 y D44:** D5.2 llama a la fecha y hora en el pasado error de coherencia sin nombrar
+  el campo; D44 dice que `missing` es solo lo ausente. El texto de D5 y de D44 no se edita.
+- **Lo prueban:** `test_every_kind_has_a_rule`, `test_date_forms`, `test_invalid_dates`,
+  `test_incomplete_date_or_time_is_missing`, `test_time_forms`, `test_unreadable_time`,
+  `test_date_and_time_together_in_the_past` (con el orden de `invalid` y el instante exacto),
+  `test_ready_values_pass_the_contract`, `test_case_d_reports_date_and_time`,
+  `test_case_d_reply_names_every_component` (sin cambios), `test_date_invalid_lines_in_the_reply`,
+  `test_weekday_meeting` y `test_case_d_through_the_node`.
+- **Pendiente** (limitaciones para las tareas 19 y 20):
+  - *Caso D frente a la línea 198:* es lo primero que un evaluador compara con el enunciado
+    (revisión de la tarea 09b, ronda 1, nota 5, y ronda 3, nota 4).
+  - *Fecha incompleta:* "el viernes 27" pide la fecha sin decir que falta el mes; si el modelo
+    devuelve después solo `{month: 11}`, D4 regla 5 reemplaza el valor entero y la fecha sigue
+    faltando. Depende de que el modelo reenvíe la fecha completa (TASK.md líneas 145 y 174-178;
+    ronda 3, nota 3). Si el autor la quiere, una línea "Falta el mes de la fecha.".
+  - *Lecturas de la brief:* una fecha sin año que ya pasó se lee como la del año siguiente (se
+    ve en la confirmación); el 29 de febrero sin año en un año no bisiesto no existe; "hoy" es la
+    fecha local de la máquina, sin zona horaria.
+
+**D57 · La validez cambia con el tiempo: los turnos que repiten lo pendiente vuelven a evaluar**
+(2026-11-17) · autodecidida por el orquestador; confirmada por el autor (2026-11-17)
+
+- **Decisión:** un turno que repite lo pendiente sin aplicar nada del mensaje evalúa otra vez los
+  pasos guardados contra el `now` del turno (`_repeat_pending`, `core/turn.py`) y escribe el
+  registro solo si el resultado difiere del guardado (estado, faltantes, inválidos, pregunta o
+  hash); si no difiere, el delta sigue vacío. Vale para la rama *Misma tool* sin cambios
+  (decisión F de la brief 09b: un mensaje repetido, un turno sin operaciones, solo una nota o un
+  nombre rechazado) y para un "sí" que D45 o D7.4 rechazan (`confirm_other_tool`,
+  `confirm_vetoed`; decisión AT, por el should-fix 1 de la revisión de la tarea 09b, ronda 1).
+  Ninguna tool corre en ningún caso.
+- **Cambia lo que se guarda:** solo cuando la validez ya cambió con el tiempo. "Hoy a las 10"
+  confirmado a las 09:00 y repetido a las 10:30 pasa a `collecting` sin `confirmation_hash`, con
+  "La hora indicada ya pasó." y la pregunta; "mañana" repetido al día siguiente guarda el hash de
+  la fecha nueva. Por eso queda a la vista del autor como revisable, como D41. [el autor la
+  confirmó el 2026-11-17]
+- **Motivo:** desde la 09b la validez depende del momento del turno. Sin reevaluar,
+  `_closing_line` recalcula el resumen contra `now` y omite la hora ya inválida: una
+  confirmación sin la línea de la hora, con el registro en `awaiting_confirmation` (TASK.md
+  líneas 186-188 y 280-284). Es lo que D47 ya hace con un "sí" de hash distinto.
+- **Precisa D7.4, D9, D40, D42 y D45:** "no cambia nada" (D7.4, D45) y "el estado no cambia"
+  (D40, D42 *Sin cambios*, D9 *Caso H*) se leen como "nada de lo que trae el mensaje": el mensaje
+  nunca entra al registro (el test compara `steps`), pero el paso del tiempo sí puede invalidar
+  la hora. Su texto no se edita.
+- **Descartada:** dejarlo y listarlo como límite (el "sí" sigue protegido por D47, que nunca
+  ejecuta con el hash distinto).
+- **Lo prueban:** `test_time_that_passed_while_pending` (el mensaje repetido a las 10:30, que
+  falla si la rama sin cambios devuelve `{}`, y un "sí" sobre el registro original, que vuelve a
+  `collecting` por D47) y `test_turned_away_yes_reassesses_against_now` (las dos rutas de AT a
+  las 10:30 y, con delta vacío, a las 09:30).
+- **Pendiente:** *`confirm_incomplete` (limitación para la tarea 12 o para las 19 y 20):* un
+  "sí" sobre un registro `collecting` no reevalúa. Con "hoy a las 10" recopilado a las 09:00 y
+  faltando el título, un "sí" a las 10:30 repite la pregunta guardada y no pide la hora; el turno
+  siguiente lo corrige (revisión de la tarea 09b, ronda 2, nota 2, y ronda 3, nota 1). Las
+  plantillas provisionales tampoco reevalúan, pero no muestran resumen.
+
+**D58 · Tarea 09b: el validador de fechas y horas conectado al turno** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** la 09b cierra D5 con D55, D56 y D57. Los demás detalles no cambian lo que ve el
+  usuario, cuándo se ejecuta una tool ni qué se guarda, así que van en una línea cada uno (regla
+  del autor desde la tarea 07):
+  - *`now` (decisión E; precisa D42):* `TurnInput` gana `now: datetime`, local y naive,
+    obligatorio y sin valor por defecto, en lugar del `today` que D42 reservaba, porque la
+    coherencia de D5.2 necesita también la hora. El nodo lo lee con `datetime.now()`
+    (`assistant/agent.py`), el único sitio del código que lee el reloj; el núcleo nunca lo lee y
+    cada test dice contra qué momento valida (D5.1: "los tests la inyectan"). Descartado: un
+    `default_factory=datetime.now` (un test de fechas que lo olvide depende del día).
+  - *Firmas:* `validate(tool, args, now)`; cada regla de `RULES` recibe `(spec, value, now)` y
+    las de la 09a lo ignoran; `shown_values(steps, now)`. `_assessment`, `_closing_line` y
+    `_pending_outcome` reciben `now`, así que el resumen, el hash y los valores que recibe la
+    tool salen del mismo momento.
+  - *Fuera lo provisional:* se borran `UNCHECKED_KINDS`, `Validation.unchecked` y
+    `DATE_TIME_NOT_CHECKED_YET`; `ready` es nada faltante ni inválido; `_closing_line` da la
+    confirmación o la pregunta, y `last_question` ya nunca es nulo en `collecting`.
+  - *Causas:* `Cause` gana `nonexistent`, `past`, `mismatch` y `bad_format`. El log no gana
+    claves: `invalid=` las lleva (`invalid=date:nonexistent,time:bad_format`).
+  - *Tabla de días:* `WEEKDAYS` vive en `core/validation.py`, junto a la regla, no en el
+    registro, y compara con `core.text.normalize`.
+  - *Guardas de forma:* una clave fuera de los componentes o una parte que no es entera →
+    `wrong_type`. Por el esquema (`DateParts`, `TimeParts`) y el filtro del registro no llegan;
+    el validador no confía en la forma, y tienen test (revisión de la tarea 09b, ronda 1, nota 3).
+  - *Coherencia por tipo:* `_time_in_the_past` empareja fecha y hora por `FieldKind`, nunca por
+    nombre, y solo si la tool tiene exactamente un campo de cada tipo: con más no está declarado
+    qué hora va con qué fecha (TASK.md línea 562).
+  - *Resumen:* la confirmación muestra los normalizados tal cual ("- La fecha: 2026-11-20",
+    "- La hora: 10:30"); el día de la semana o la fecha en palabras quedan fuera. Las líneas
+    "Anoté …" siguen con los componentes como llegaron (D42).
+  - *`NOW` de los tests:* `datetime(2026, 11, 17, 9, 0)`, un martes, en
+    `tests/interpretations.py`. `phase0/scenarios.py` y `tests/case_c_judge.py` lo pasan, así
+    que el arnés y el juez nunca leen el reloj; `B1` y `F1` no traen fecha, y los registros y
+    resúmenes con que se midió D32 no cambian.
+  - *Tests por el nodo:* usan el reloj real, así que solo pasan fijos que no dependen del día:
+    `D1` (inválido cualquier día), `C1` (su "mañana" no llega al validador) y la reunión de
+    `test_meeting_through_the_node`, en el año 2099. `test_case_d_through_the_node` quita `op=`
+    antes de buscar "40", "25" y "90" en la línea de log, porque el uuid hex puede contenerlos.
+- **Motivo:** RF-04 pide validación determinística (TASK.md líneas 166-168) y §7, tests
+  automatizados (línea 522): con `now` inyectado, un test de fechas no depende del día en que
+  corre. RF-07 guarda el estado de validación (línea 218) y RF-08 ejecuta solo con todo validado
+  (líneas 239-241): una reunión llega por fin a `awaiting_confirmation` y, con un "sí", al mock.
+- **Resuelve:** el *Pendiente* de D44 (el caso D, el `validate` repetido de `_closing_line` y
+  `test_complete_meeting_does_not_reach_confirmation`, reemplazado por
+  `test_meeting_through_the_node`) y el de D47 (nota 2: `test_yes_with_a_note_never_counts`
+  reescrito sobre una reunión en `awaiting_confirmation` con "Sí, y quita a Ana", que no
+  ejecuta; nota 4: D55).
+- **Lo prueban:** `test_validation_depends_only_on_now`, `test_complete_meeting_awaits_confirmation`
+  (el mismo mensaje otra vez da delta vacío), `test_yes_with_a_note_never_counts` (después, un
+  "sí" corre una vez con `2026-11-20` y `10:30`), `test_meeting_through_the_node`
+  (`schedule_meeting` corre una vez por el `Runner`, con su línea de resultado y su entrada en
+  `history`), `test_weekday_meeting` (el hash tras una fusión con cambios es el de lo mostrado) y
+  los de D55, D56 y D57; `grep -rn "now()\|today()" core` da vacío y `datetime.now()` sale una
+  vez, en `assistant/agent.py`.
+- **Pendiente:**
+  - *Reloj del nodo:* ningún test lo fija; la única mutación que sobrevive a la revisión es un
+    `now` fijo en el nodo, y solo la vigila el grep (revisión de la tarea 09b, ronda 3, nota 5).
+    La cerraría un test que parchee `datetime` en `assistant.agent` y pase "mañana" por el
+    `Runner`.
+  - *Tamaño:* `core/turn.py` tiene 510 líneas (tarea 15) y `core/validation.py`, 263 (ronda 3,
+    nota 7).
