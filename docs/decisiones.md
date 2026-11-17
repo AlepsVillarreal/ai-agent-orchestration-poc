@@ -2,7 +2,8 @@
 
 Registro de las decisiones de arquitectura del PoC, en el orden en que se tomaron. Las
 referencias a `TASK.md` y sus números de línea apuntan al enunciado de la prueba técnica,
-copiado literal en [`TASK.md`](TASK.md).
+copiado literal en [`TASK.md`](TASK.md); su línea 4 queda en blanco a propósito para conservar
+esa numeración (D72).
 
 Una entrada marcada **autodecidida por el orquestador; revisable** es una elección de
 implementación que el orquestador del equipo de agentes tomó sin detener el trabajo, por regla
@@ -1522,7 +1523,8 @@ D10** (2026-11-17) · autodecidida por el orquestador; revisable
   turno mixto con una tool fuera del catálogo, y un registro que no está en `collecting`) y a
   `READY_NOT_AVAILABLE_YET` con un registro completo. Ningún test fija esa parte (revisión de la
   tarea 08, ronda 2, nota 1). Las tareas 10a y 12, que reemplazan esas plantillas, deben
-  decidirla y probarla en vez de heredarla. [la parte de la 10a, resuelta en D45 y D47]
+  decidirla y probarla en vez de heredarla. [la parte de la 10a, resuelta en D45 y D47] [la parte
+  de la 12, resuelta en D71]
 - **Redacción:** "Parte de tu solicitud" es inexacta cuando la única operación del turno era la
   descartada; se acepta por ahora.
 - **Descartada:** dejar la pregunta pendiente sola, sin aviso (el descarte silencioso que D10
@@ -1799,7 +1801,8 @@ orquestador; revisable
   `awaiting_confirmation`. Su texto no se edita.
 - **Precisa D41:** con algo pendiente, la línea de D10 precede también a la confirmación
   mostrada o repetida. Las plantillas provisionales que quedan (`reject`, `cancel`, `question`,
-  `other`, *Otra tool*) y la redacción "Parte de tu solicitud" siguen en la 12.
+  `other`, *Otra tool*) y la redacción "Parte de tu solicitud" siguen en la 12. [resuelto en
+  D71]
 - **Lo prueban:** `test_complete_request_awaits_confirmation`,
   `test_case_b_reaches_confirmation`, `test_yes_runs_the_pending_operation_once`,
   `test_yes_while_collecting_repeats_the_question`, `test_yes_with_a_change_never_runs`,
@@ -1817,6 +1820,7 @@ orquestador; revisable
   que lo explique (nota 4) [resuelto en D55]. En el "sí" que ejecuta, cada paso se valida tres
   veces (nota 3). `core/turn.py` tiene 406 líneas (umbral de la brief: ~350), y `record_tools` y
   `without_id` están repetidos en los tests (nota 6). `reject` y `cancel` (D7.3) son la 12.
+  [resuelto en D66, D69 y D71]
 
 **D48 · Respuesta tras ejecutar: una línea de plantilla por paso, con el ID del resultado**
 (2026-11-17) · autodecidida por el orquestador; revisable
@@ -2243,7 +2247,8 @@ orquestador; revisable
   "sí" sobre un registro `collecting` no reevalúa. Con "hoy a las 10" recopilado a las 09:00 y
   faltando el título, un "sí" a las 10:30 repite la pregunta guardada y no pide la hora; el turno
   siguiente lo corrige (revisión de la tarea 09b, ronda 2, nota 2, y ronda 3, nota 1). Las
-  plantillas provisionales tampoco reevalúan, pero no muestran resumen.
+  plantillas provisionales tampoco reevalúan, pero no muestran resumen. [resuelto en D67, D68 y
+  D71]
 
 **D58 · Tarea 09b: el validador de fechas y horas conectado al turno** (2026-11-17) ·
 autodecidida por el orquestador; revisable
@@ -2565,3 +2570,251 @@ el orquestador; revisable
   - *`MOCK_FAIL` con el modelo real:* solo se probó por `_run` con el modelo falso; `adk web` con
     el registro en memoria no se lanzó.
   - *Tamaño:* `core/turn.py` tiene 532 líneas (tarea 15).
+
+**D64 · Cambio de intención: una línea fija dice que se descartó lo pendiente** (2026-11-17) ·
+decidida por el autor
+
+- **Decisión:** en un cambio de intención (*Otra tool*, D3.1), la respuesta antepone a la del
+  flujo nuevo la línea fija del descarte (D66) con las acciones de lo abandonado: "No voy a
+  {acciones}; descarté lo que tenía pendiente.". Si el filtro del registro descartó algo, la línea
+  de D10 va primero (D41). Respuesta del autor a la brief 12, decisión B, opción (a).
+- **Lo que ve el usuario:** en el caso F, con la reunión con Juan pendiente, "Mejor crea un ticket
+  para revisar el servidor" responde "No voy a programar una reunión; descarté lo que tenía
+  pendiente.", "Anoté la descripción: revisar el servidor." y la pregunta del ticket (el título,
+  la prioridad y a quién se asigna). Nada se ejecuta.
+- **Motivo:** el caso F pide detectar el cambio de intención (TASK.md línea 411). Sin la línea, el
+  usuario no sabe si la reunión sigue en pie, y un "sí" posterior ya no la ejecutaría sin que
+  nadie se lo haya dicho (líneas 282-284). Es la misma línea del descarte por `cancel` o `reject`,
+  así que el usuario lee lo mismo cuando algo pendiente se deja de lado.
+- **Precisa D3.1:** D3.1 fija qué pasa con el registro, no qué ve el usuario. Su texto no se
+  edita.
+- **Descartada:** (b) sin línea: la respuesta del flujo nuevo como si nada estuviera pendiente, y
+  el abandono solo en `history` y en el log (`route=other_tool:R2`).
+- **Lo prueban:** `test_case_f_other_tool_abandons_and_starts_the_new_flow` (`request_action` y
+  `provide_info`), `test_case_f_through_the_node` y `test_d10_line_before_every_new_pending_branch`
+  (la línea de D10, la del descarte y el flujo nuevo, en ese orden).
+- **Pendiente:** la línea también precede a R3 y R4 tras un cambio de intención, aunque el turno
+  vuelva a pedir la tool abandonada (D71, AW 1).
+
+**D65 · Un cierre sin ejecutar guarda los pasos como estaban en `pending`** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** un registro que se cierra sin ejecutar (`cancelled` o `abandoned`) va a
+  `history` como `{operation_id, status, steps}` con los `steps` del registro tal como estaban
+  en `pending`, `{tool, args}`: las palabras del usuario tras la fusión, sin normalizar ni
+  validar. No lleva `outcome`, `values` ni `result`, porque ninguna tool recibió nada. Lo arma
+  `_closed_without_running` (`core/turn.py`) con `closed_entry` y `appended` (D49); las
+  constantes `CANCELLED` y `ABANDONED` viven en `core/history.py`. Decisión A de la brief 12,
+  opción (a).
+- **Lo que se guarda:** desde la 12, un "no", un "cancela" o un cambio de intención vacían
+  `pending` y agregan la entrada a `history` (las últimas 10). Ninguna regla la lee (D6): ni la
+  fusión (D4), ni la compuerta (D3), ni `pending_summary` (D14). El usuario no la ve.
+- **Motivo:** D6 manda guardar el cierre "con su estado final, sus valores"; RF-07 pide mantener
+  la intención y el estado de ejecución como estado estructurado, separado de la conversación
+  (TASK.md líneas 210-222 y 229). En el caso F deja a la vista que la reunión con Juan quedó
+  archivada y que el ticket nuevo no la hereda (línea 413).
+- **Precisa D59:** "cada paso … es `{tool, values, outcome, result}`" vale para los cierres tras
+  un "sí". El texto de D59 no se edita.
+- **Descartadas:** (b) `steps: []` (pierde "sus valores" de D6); (c) la forma de D59 con
+  `outcome: "not_run"`, `values` normalizados y `result: null` (más código y unos `values` que
+  nadie ejecutó).
+- **Lo prueban:** `test_case_f_other_tool_abandons_and_starts_the_new_flow`,
+  `test_cancel_or_plain_reject_discards_and_archives`,
+  `test_closing_without_running_keeps_the_last_ten` (un `history` de 10 sigue en 10, con el
+  cierre al final) y `test_case_f_through_the_node` (la reunión `abandoned` con
+  `attendees == ["Juan"]` en la sesión).
+
+**D66 · Redacción del descarte: "No voy a {acciones}; descarté lo que tenía pendiente."**
+(2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** `cancel`, y `reject` sin argumentos (D69), responden solo con una línea fija:
+  "No voy a {acciones}; descarté lo que tenía pendiente.", con las `action_phrase` de
+  `pending["tools"]` unidas con "ni" (`discarded_line`, `core/replies.py`). Es la misma línea que
+  D64 antepone a un flujo nuevo. Decisión C de la brief 12.
+- **Lo que ve el usuario:** con un ticket pendiente, "Mejor cancela" responde "No voy a crear un
+  ticket; descarté lo que tenía pendiente.", y un "sí" posterior, "No hay ninguna operación
+  pendiente." (TASK.md línea 284). Solo cambia la redacción; el contenido lo fija D7.3.
+- **Motivo:** las frases salen del registro y no de un nombre de tool (TASK.md línea 562). Sin
+  "Listo", que es la palabra de un resultado (D48), y sin valores.
+- **Descartada:** la frase de la regla 1 de la aclaración ("No inicié ninguna acción…"), que no
+  es cierta cuando la operación ya estaba iniciada y esperando el "sí".
+- **Lo prueban:** `test_cancel_or_plain_reject_discards_and_archives`,
+  `test_discarded_line_joins_actions_with_ni` y `test_cancel_through_the_node`.
+
+**D67 · `question` y `other` con algo pendiente: las capacidades sin pregunta y lo pendiente**
+(2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** con un registro en `collecting` o `awaiting_confirmation`, `question` y `other`
+  responden la frase de capacidades de D20 sin su "¿Qué necesitas?" (`capabilities(ask=False)`)
+  y después lo pendiente repetido (la pregunta, o la confirmación con sus valores) por
+  `_repeat_pending`. Nada del mensaje entra al registro, aunque traiga operaciones de la tool
+  pendiente o de otra tool `explicit`. Decisión D de la brief 12, opción (a).
+- **Lo que ve el usuario:** con un ticket pendiente, "¿Puedes enviar notificaciones por SMS?"
+  responde "Puedo ayudarte a crear un ticket, programar una reunión o enviar una notificación." y
+  la pregunta del ticket. No invita a una solicitud nueva que abandonaría lo pendiente.
+- **Lo que se guarda:** solo lo que D57 permite: el registro se escribe si su validez cambió con
+  el tiempo; si no, el delta es vacío.
+- **Motivo:** D3 (*Resto*) manda "una plantilla" sin tocar el estado; una intención informativa
+  no inicia ni cambia nada (TASK.md línea 554), y el resumen nunca sale sin la línea de una hora
+  que ya pasó (D57).
+- **Precisa D3 y D20:** "no tocan el estado" se lee como en D57 ("nada de lo que trae el
+  mensaje"). La plantilla de D20 sin nada pendiente no cambia. El texto de D3 y D20 no se edita.
+- **Descartadas:** (b) la plantilla de D20 tal cual (termina en "¿Qué necesitas?" y el usuario
+  pierde de vista lo pendiente); (c) solo lo pendiente repetido, como D40 (no contesta la
+  pregunta).
+- **Lo prueban:** `test_question_or_other_with_pending_keeps_state` (`Q1` y `K3` con `A1` y con
+  `H1`), `test_question_or_other_with_operations_keeps_state` (un dato de la tool pendiente y
+  otra tool `explicit`) y `test_repeating_branches_reassess_against_now`.
+
+**D68 · Solo `plausible` de otra tool: nada del mensaje entra al registro** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** la rama *Solo `plausible` de otra tool* de D3 es: `act` `request_action` o
+  `provide_info`, ninguna operación `explicit` de una tool no pendiente y alguna operación de una
+  tool no pendiente (por eliminación, `plausible`). Nada del mensaje entra al registro, tampoco
+  las operaciones de la tool pendiente de ese turno; lo pendiente se repite con
+  `_repeat_pending` (D57), como D45 trata un "sí" que mezcla otra tool. Ruta
+  `plausible_other_tool`. Decisión E de la brief 12.
+- **Lo que ve el usuario:** la última pregunta o la confirmación pendiente, sin cambios. Una
+  `plausible` nunca descarta un flujo ni inicia otro (TASK.md líneas 128-134).
+- **Motivo:** lectura literal de D3 ("el registro pendiente no se toca y se repite su última
+  pregunta"). Fusionar los datos de la tool pendiente convertiría una lectura dudosa del modelo
+  en un cambio guardado.
+- **Descartada:** fusionar los datos de la tool pendiente e ignorar la `plausible`.
+- **Lo prueban:** `test_only_plausible_of_another_tool_repeats_the_question` (una `plausible`
+  sola y junto a `priority="alta"` del ticket pendiente: delta vacío y `steps` sin la prioridad)
+  y `test_repeating_branches_reassess_against_now`.
+- **Pendiente:** *limitación para la tarea 20:* "prioridad alta, y quizá avísale a Carlos", si
+  la segunda parte llega `plausible`, no anota la prioridad; el usuario la tiene que repetir.
+
+**D69 · "`reject` con argumentos" (D7.3): un argumento presente de una tool pendiente**
+(2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** un `reject` tiene argumentos si alguna operación de una tool pendiente trae algún
+  argumento presente tras el filtro del registro y sin ausentes (`drop_absent`, D4 regla 2).
+  Entonces es una corrección: pasa por `_merge_steps` y `_after_merge` (ruta `reject_merged`), y
+  un cambio vuelve a mostrar la confirmación con hash nuevo o vuelve a `collecting` (D47); sin
+  cambios se repite lo pendiente (D40, D57); un nombre no escrito se rechaza (D38). Nunca ejecuta.
+  Una operación de la tool pendiente sin argumentos, una `plausible` de otra tool o nada es "sin
+  argumentos" y descarta (`cancelled`, D66). Decisión F de la brief 12.
+- **Lo que ve el usuario:** con un ticket en confirmación asignado a Carlos, "No, asígnalo a Ana"
+  responde "Cambié a quién se asigna: Carlos → Ana." y la confirmación con los valores nuevos; el
+  "sí" siguiente crea el ticket asignado a Ana. "No, el ticket no" descarta.
+- **Motivo:** D7.3 manda incorporar la corrección y volver a pedir confirmación, que la línea 145
+  de TASK.md obliga a no perder y RF-05 a validar otra vez (líneas 179-182); "contradicciones
+  entre argumentos" es la pregunta de defensa 5 (línea 557).
+- **Lo prueban:** `test_reject_with_args_is_a_correction` (la corrección y su "sí", el mismo valor
+  sin cambios y una corrección en `collecting`) y
+  `test_cancel_or_plain_reject_discards_and_archives` (`S2`, `reject` con una operación sin
+  argumentos y con una `plausible` de otra tool).
+- **Pendiente:**
+  - *Limitación para la tarea 20:* un "no" al que el modelo añada un nombre que el usuario no
+    escribió no descarta: responde la línea de nombre rechazado y repite lo pendiente; un segundo
+    "no" o "cancela" sí descarta (revisión de la tarea 12, ronda 3, nota 4).
+  - *Sin test (tarea 15):* la parte "sin ausentes": un `reject` con `priority: ""` descarta (sonda
+    de la revisión de la tarea 12, ronda 3), pero cambiar `drop_absent(op["args"])` por
+    `op["args"]` no rompe ningún test (should-fix 1 de esa ronda, abierto).
+
+**D70 · `reject` o `cancel` con solo una `plausible` de otra tool descarta** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** la rama *Solo `plausible` de otra tool* (D68) solo toma `request_action` y
+  `provide_info`. Un "no" o un "cancela" acompañado solo de una `plausible` de otra tool archiva
+  lo pendiente como `cancelled` (D7.3, D66) y no inicia nada.
+- **Lo que ve el usuario:** "No, quizá avísale a Carlos" con un ticket pendiente responde "No voy
+  a crear un ticket; descarté lo que tenía pendiente.". Nada `plausible` se aplica ni se ejecuta.
+- **Motivo:** el acto del usuario es descartar; la `plausible` no descarta, lo hace el "no". Nota 2
+  de la revisión de la tarea 12, ronda 2.
+- **Precisa D3:** su rama *Solo `plausible`* no nombra `act`, y está antes de *Resto*; leída al
+  pie de la letra, ese "no" no tocaría el registro. Aquí `reject` y `cancel` van a D7.3. El texto
+  de D3 no se edita.
+- **Lo prueba:** `test_cancel_or_plain_reject_discards_and_archives` (la entrada de `_PLAIN_NO`
+  con `op("send_notification", "plausible", recipient="Carlos")`, con `A1` y con `H1`).
+
+**D71 · Tarea 12: cambio de intención, rechazo y cancelación en el turno** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** con un registro en `collecting` o `awaiting_confirmation`, `_pending_gate`
+  (`core/turn.py`) resuelve todo lo que no es `confirm`, en este orden: *Otra tool* (D3.1, D64,
+  D65), *Misma tool*, *Solo `plausible`* (D68), `reject` con argumentos (D69), `reject` sin
+  argumentos o `cancel` (D66, D70) y `question`/`other` (D67). Decide por `act`, `certainty` y el
+  nombre de las tools pendientes, nunca por el texto. Los detalles no cambian lo que ve el usuario,
+  cuándo se ejecuta una tool ni qué se guarda más allá de D64–D70, así que van en una línea cada
+  uno (regla del autor desde la tarea 07):
+  - *Otra tool:* `_rules_table` corre sobre todas las operaciones del turno, contra nada guardado;
+    R2 escribe el registro nuevo con otro `operation_id` y R3–R5 no crean nada, así que `pending`
+    queda vacío. Un `reject` o `cancel` que trae otra tool `explicit` es *Otra tool* y cierra
+    `abandoned` (D3.1); `cancelled` es solo el descarte sin flujo nuevo.
+  - *Rutas (decisión G):* `other_tool:<fila>` (`other_tool:R2` … `:R5`), `plausible_other_tool`,
+    `reject_merged`, `cancelled` y `pending_template`; `pending_provisional` queda solo para un
+    registro que no está en `collecting` ni `awaiting_confirmation` (`awaiting_clarification`,
+    tarea 13), con `PENDING_NOT_SUPPORTED_YET`.
+  - *Log:* sin claves nuevas. `op=` da el registro nuevo en *Otra tool* (o el abandonado si la
+    tabla no creó ninguno) y el cancelado en `cancelled`; el `operation_id` del abandonado queda
+    en `history`.
+  - *`confirm_incomplete` (precisa D57):* un "sí" sobre un registro `collecting` pasa por
+    `_repeat_pending`: reevalúa contra `now` y escribe el registro solo si su validez cambió.
+  - *Línea de D10 (precisa D41):* precede a la respuesta en todas las ramas nuevas, como ya hacía
+    `handle_turn`. La redacción "Parte de tu solicitud" no cambia.
+  - *`confirm` con otra tool:* sigue en D45 (`_decide` lo resuelve antes de `_pending_gate`),
+    nunca en *Otra tool*.
+  - *D11:* va antes que todo; un `reject` o `cancel` con dos operaciones de una tool responde D11.
+  - *AW 1, R3 y R4 tras un cambio de intención:* la línea del descarte se antepone aunque el turno
+    vuelva a pedir la tool abandonada ("No voy a crear un ticket; …" y "Por ahora puedo atender
+    una operación a la vez; ¿cuál necesitas primero?"); lectura literal de D64 y D3.1.
+  - *AW 2:* `reject` con argumentos de la tool pendiente ignora sin línea una operación
+    `plausible` de otra tool, como D68.
+  - *AW 3:* `reject` con argumentos más una tool que el filtro descartó fusiona tras la línea de
+    D10, como *Misma tool* (D41); D45 solo veta el `confirm`, porque un "sí" ejecuta y una
+    corrección no.
+  - *Tests reescritos:* `test_anything_with_pending_is_provisional_and_keeps_state` pasa a
+    `test_pending_branches_are_no_longer_provisional` (`A1`→`Q1` es D67 y `F1`→`F2`, *Otra tool*),
+    y `test_only_a_confirmed_yes_writes_history` (D49) a `test_only_a_closing_writes_history`
+    (también `cancelled` y `other_tool:*` escriben `history`).
+- **Lo que ve el usuario (casos F y G):** el caso F de punta a punta (TASK.md líneas 395-417): se
+  dice el cambio, el ticket nace solo con su descripción, la reunión queda archivada y nada se
+  ejecuta. Tras un cambio de intención, el "sí" corre solo la tool nueva (líneas 282-284 y
+  436); tras un "no" o un "cancela", encuentra "No hay ninguna operación pendiente." (línea
+  284).
+- **Motivo:** RF-02 pide no invocar herramientas que no corresponden a la intención (TASK.md
+  líneas 128-134); RF-07, mantener la intención actual y lo abandonado como estado estructurado
+  (líneas 210-222 y 229); RF-10, que un "sí" nunca autorice otra tool (líneas 276-284); el
+  objetivo 7 (línea 22) y las preguntas 2, 4 y 5 de §9 (líneas 554, 556 y 557).
+- **Resuelve:** el *Pendiente* de D57 (`confirm_incomplete`), la parte de la 12 del *Alcance real*
+  de D41 y el *Pendiente* de D47 (`reject` y `cancel`).
+- **Lo prueban:** `test_case_f_other_tool_abandons_and_starts_the_new_flow`,
+  `test_other_tool_while_awaiting_confirmation_runs_only_the_new_tool`,
+  `test_reject_or_cancel_with_another_tool_is_a_change_of_intention` (`other_tool:R2`, `:R3` y
+  `:R4`, también con la tool pendiente en el turno),
+  `test_confirm_incomplete_reassesses_against_now`,
+  `test_d10_line_before_every_new_pending_branch`, `test_clarification_stays_provisional` (`F2` y
+  `cancel` sobre `awaiting_clarification`, delta vacío),
+  `test_pending_branches_are_no_longer_provisional`, `test_only_a_closing_writes_history`,
+  `test_case_f_through_the_node` y
+  `test_cancel_through_the_node`; `test_no_turn_executes_a_tool` y
+  `test_same_tool_needs_a_collecting_record` siguen sin cambios.
+- **Pendiente:**
+  - *Limitación para las tareas 19 y 20 (AW 1):* un cambio de intención que cae en R3 o R4 archiva
+    lo pendiente y responde la línea del descarte y la plantilla provisional, sin crear nada: el
+    usuario pierde lo recopilado hasta que la 13 y la 14a reemplacen esa plantilla (revisión de la
+    tarea 12, ronda 1, nota 7, y ronda 3, nota 4).
+  - *Herencia en Otra tool (tarea 14a):* "ninguna tool conserva argumentos guardados" (D3.1)
+    no es observable hoy, porque R2 exige una sola `explicit` y R3/R4 no crean registro; la brief
+    de la 14a debe pedir el test (un ticket pendiente con título y un turno con `create_ticket` y
+    `send_notification` `explicit` → el paso del ticket del plan sin el título guardado; ronda 1,
+    nota 4).
+  - *Sin test:* AW 2 solo se vio en sondas de la revisión.
+  - *Tamaño:* `core/turn.py` tiene 599 líneas, a una del límite de la brief (tarea 15).
+
+**D72 · Numeración de `TASK.md`: una línea en blanco en lugar de la línea 4** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** el commit del autor `681031a` quitó la línea 4 de `docs/TASK.md` (el enlace a
+  `CLAUDE.md`, que no se versiona), y toda cita "TASK.md línea N" con N ≥ 4 quedó corrida en uno.
+  El conciliador de la 12 pone una línea en blanco en su lugar: el archivo vuelve a tener 596
+  líneas y desde la 5 cada una coincide con su número anterior. El enlace sigue fuera y nada más
+  cambia.
+- **Motivo:** el Markdown se ve igual y todas las citas de `docs/decisiones.md`, el código, los
+  tests, el backlog y las briefs vuelven a valer sin tocar cientos de líneas. No cambia lo que ve
+  el usuario, ni cuándo se ejecuta una tool, ni qué se guarda.
+- **Descartada:** renumerar todas las citas.

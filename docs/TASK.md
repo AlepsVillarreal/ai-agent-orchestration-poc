@@ -2,6 +2,7 @@
 
 > Copia literal del enunciado recibido para la entrevista técnica. No editar: es la fuente de verdad de los requerimientos.
 
+
 ---
 
 1. Objetivo
