@@ -1,10 +1,11 @@
 """The function that decides one turn.
 
 `handle_turn` receives the pending record, the interpreter's output, the turn's own inputs
-(`TurnInput`: today the message text) and the closed operations (`history`, D6, read by no
-rule), and returns a template reply plus the state change. It calls no model. The ADK turn node
-is its only caller: it puts `reply` in the event's message and `state_delta` in the event's
-state (D1.1). `_run_confirmed` is the only place in the code that runs a tool (D46).
+(`TurnInput`: the message text and the moment of the turn) and the closed operations
+(`history`, D6, read by no rule), and returns a template reply plus the state change. It calls
+no model. The ADK turn node is its only caller: it puts `reply` in the event's message and
+`state_delta` in the event's state (D1.1). `_run_confirmed` is the only place in the code that
+runs a tool (D46).
 
 Order of a turn (D3, *Compuerta de entrada*):
 1. Registry filter (`filter_by_registry`): drop operations of unknown tools and keep only the
@@ -14,21 +15,26 @@ Order of a turn (D3, *Compuerta de entrada*):
    args share no key (each `_add`/`_remove` bucket is its own key; absent values do not count)
    and that bring the same `depends_on` are first joined into one, which then goes through
    the merge like any single operation. Nothing pending, another tool in the turn or `confirm`:
-   D11 as written, so two requested tickets never become one.
+   D11 as written, so outside *Misma tool* two requested tickets never become one (inside it,
+   two tickets with disjoint keys join into the pending one, D54).
 3. Something pending, in `collecting` or `awaiting_confirmation`:
    - `confirm` -> `_confirm`, in this order: (1) an operation of another tool, or something
-     the filter dropped -> repeat what is pending (author's answer to brief 10a, option (a));
+     the filter dropped -> repeat what is pending (author's answer to brief 10a, option (a)),
+     assessed again against `now` like a turn without changes (autodecided AT);
      (2) `confirms_tool` naming a tool that is not pending -> the same (D7.4); (3) operations of
      the pending tool go through the merge first, and a change, a rejected name or a note never
      runs (what D4 requires of D7); (4) still `collecting` -> repeat the question (D7.1);
      (5) the hash of the shown values must match (D7.2), else show them again with the new
-     hash; (6) `_run_confirmed` calls the tool once with the normalized values, empties
-     `pending`, answers with one result line per step and appends the record to `history`.
+     hash, after a line that says the values changed (author's answer on note (ddd));
+     (6) `_run_confirmed` calls the tool once with the normalized values, empties `pending`,
+     answers with one result line per step and appends the record to `history`.
    - *Misma tool*: `act` is `request_action` or `provide_info` and every operation is of a
      pending tool (none at all counts too) -> each operation is anchored and merged into the
      step of its tool (D4, D18); `certainty` is ignored (D2). The reply shows every change,
      every note and the fixed rejected-name line, then the question or the confirmation. A
-     merge that changes nothing repeats them with the state unchanged (D9 *Caso H*, D40).
+     merge that changes nothing repeats them with the state unchanged (D9 *Caso H*, D40),
+     unless the steps assessed again against `now` give another result (a time that passed
+     while the record waited): then the reassessed record is written. Nothing runs.
    - Anything else (and any other status) -> provisional template, state unchanged (tasks 12
      and 13).
 4. Nothing pending -> route by `act`; a request goes to the rules table (R1-R5), which counts
@@ -46,16 +52,18 @@ Order of a turn (D3, *Compuerta de entrada*):
      (`confirmation_hash`, D7.2). The reply shows the normalized values of each step and asks
      for a yes; `last_question` keeps only that question, without values (D43). Nothing runs
      in the turn a record becomes complete (D7.1).
-   Dates and times have no rule until task 09b, so a step with one is never valid: it stays
-   `collecting` with no question and closes with a provisional template.
+   Dates and times are resolved against `TurnInput.now` (D5.1, D5.2), so the shown values
+   (the ISO date of "mañana") and their hash depend on the moment of the turn.
 
 The message text is used only to anchor names (D4 rule 3): it goes neither to the state nor to
-the log. The normalized values are recomputed every time, never stored (D44).
+the log. The core never reads the clock: `now` comes from the turn node. The normalized values
+are recomputed every time, never stored (D44).
 """
 
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -76,11 +84,14 @@ AWAITING_CONFIRMATION = "awaiting_confirmation"
 class TurnInput:
     """What the core needs from the turn that does not come from the interpreter.
 
-    `message` is the user's text, read only to anchor names (D4 rule 3). Later tasks add
-    `today` (09b) and `session_id` (11) here.
+    `message` is the user's text, read only to anchor names (D4 rule 3). `now` is the moment of
+    the turn, local and naive: dates and times are validated against it (D5.1, D5.2). It has no
+    default, so every caller, tests included, says which moment it validates against; only the
+    turn node reads the clock. Task 11 adds `session_id`.
     """
 
     message: str
+    now: datetime
 
 
 @dataclass
@@ -107,7 +118,7 @@ def handle_turn(
         pending,
         interpretation.act,
         operations,
-        turn_input.message,
+        turn_input,
         confirms_tool=interpretation.confirms_tool,
         dropped_some=dropped_some,
         history=history,
@@ -126,7 +137,7 @@ def _decide(
     pending: dict | None,
     act: Act,
     operations: list[dict],
-    message: str,
+    turn_input: TurnInput,
     confirms_tool: str | None,
     dropped_some: bool,
     history: Sequence[dict],
@@ -144,10 +155,12 @@ def _decide(
         # `question`, `other` and the clarification are tasks 12 and 13.
         if pending.get("status") in (COLLECTING, AWAITING_CONFIRMATION):
             if act == Act.CONFIRM:
-                return _confirm(pending, operations, message, confirms_tool, dropped_some, history)
+                return _confirm(
+                    pending, operations, turn_input, confirms_tool, dropped_some, history
+                )
             if same_tool:
-                steps, merges = _merge_steps(pending, operations, message)
-                return _after_merge(pending, steps, merges, route="same_tool")
+                steps, merges = _merge_steps(pending, operations, turn_input.message)
+                return _after_merge(pending, steps, merges, turn_input.now, route="same_tool")
         return TurnOutcome(replies.PENDING_NOT_SUPPORTED_YET, route="pending_provisional")
 
     # D3 gate, step 4: nothing is pending.
@@ -156,7 +169,7 @@ def _decide(
     if act in (Act.QUESTION, Act.OTHER):
         return TurnOutcome(replies.capabilities(), route="template")
     # `request_action`, or `provide_info` with operations, which is treated the same.
-    return _rules_table(operations, message)
+    return _rules_table(operations, turn_input)
 
 
 def _is_same_tool(pending: dict | None, act: Act, operations: list[dict]) -> bool:
@@ -197,14 +210,14 @@ def _join_split_operations(operations: list[dict]) -> list[dict]:
     return result
 
 
-def _rules_table(operations: list[dict], message: str) -> TurnOutcome:
+def _rules_table(operations: list[dict], turn_input: TurnInput) -> TurnOutcome:
     explicit = [op for op in operations if op["certainty"] == Certainty.EXPLICIT]
     plausible = [op for op in operations if op["certainty"] == Certainty.PLAUSIBLE]
 
     if not operations:
         return TurnOutcome(replies.capabilities(), route="R1")
     if len(explicit) == 1 and not plausible:
-        return _start_flow(explicit[0], message)
+        return _start_flow(explicit[0], turn_input)
     if len(explicit) >= 2 and not plausible:
         route = "R3"
     elif explicit:
@@ -214,7 +227,7 @@ def _rules_table(operations: list[dict], message: str) -> TurnOutcome:
     return TurnOutcome(replies.ONE_OPERATION_AT_A_TIME, route=route)
 
 
-def _start_flow(operation: dict, message: str) -> TurnOutcome:
+def _start_flow(operation: dict, turn_input: TurnInput) -> TurnOutcome:
     """R2: anchor and merge against an empty record, then ask for what is missing or confirm.
 
     `args` keeps the user's words unvalidated (D4 rule 7) and only contract fields (D4 rule
@@ -222,11 +235,11 @@ def _start_flow(operation: dict, message: str) -> TurnOutcome:
     `operation_id` is born here and the log reads it.
     """
     tool = TOOLS[operation["tool"]]
-    merged = merge_args(tool, {}, operation["args"], message)
+    merged = merge_args(tool, {}, operation["args"], turn_input.message)
     steps = [{"tool": tool.name, "args": merged.args}]
     record = {"operation_id": uuid4().hex, "tools": [tool.name], "steps": steps}
-    record.update(_assessment(steps))
-    return _pending_outcome(record, [(tool, merged)], route="R2")
+    record.update(_assessment(steps, turn_input.now))
+    return _pending_outcome(record, [(tool, merged)], turn_input.now, route="R2")
 
 
 def _merge_steps(
@@ -251,28 +264,53 @@ def _merge_steps(
 
 
 def _after_merge(
-    pending: dict, steps: list[dict], merges: list[tuple[ToolSpec, MergeResult]], route: str
+    pending: dict,
+    steps: list[dict],
+    merges: list[tuple[ToolSpec, MergeResult]],
+    now: datetime,
+    route: str,
 ) -> TurnOutcome:
-    """Validate again after a merge that changed something (D5) and pick the status.
+    """Validate again after a merge (D5) and pick the status.
 
     No change (no operation, a repeated request, only a note or a rejected name) leaves the
     state as it is and repeats the pending question or confirmation after those lines (D9
-    *Caso H*, D40, D42; TASK.md line 447). A change that leaves a step incomplete or invalid
-    sends the record back to `collecting` and drops its `confirmation_hash` (D7.1).
+    *Caso H*, D40, D42; TASK.md line 447), unless the stored steps assessed against `now` give
+    another result than the stored one: "hoy a las 10" confirmed at 09:00 and repeated at 10:30
+    (as D47 does with a "yes"). Then the reassessed record is written.
+    A change that leaves a step incomplete or invalid sends the record back to `collecting`
+    and drops its `confirmation_hash` (D7.1).
     """
     if not any(merged.changes for _, merged in merges):
-        return _pending_outcome(pending, merges, route=route, changed=False)
+        return _repeat_pending(pending, merges, now, route)
 
+    return _pending_outcome(_reassessed(pending, steps, now), merges, now, route=route)
+
+
+def _repeat_pending(
+    pending: dict, merges: list[tuple[ToolSpec, MergeResult]], now: datetime, route: str
+) -> TurnOutcome:
+    """Repeat what is pending, after the lines of `merges`, with nothing of the message applied.
+
+    The stored steps are assessed again against `now` (decision F; autodecided AS): the record is
+    written only if the result differs from the stored one (a time that passed while it
+    waited), else the state is unchanged (D40, D42). Nothing runs.
+    """
+    record = _reassessed(pending, pending["steps"], now)
+    return _pending_outcome(record, merges, now, route=route, changed=record != pending)
+
+
+def _reassessed(pending: dict, steps: list[dict], now: datetime) -> dict:
+    """`pending` with `steps` and their assessment against `now`; the old hash never stays."""
     record = {key: value for key, value in pending.items() if key != "confirmation_hash"}
     record["steps"] = steps
-    record.update(_assessment(steps))
-    return _pending_outcome(record, merges, route=route)
+    record.update(_assessment(steps, now))
+    return record
 
 
 def _confirm(
     pending: dict,
     operations: list[dict],
-    message: str,
+    turn_input: TurnInput,
     confirms_tool: str | None,
     dropped_some: bool,
     history: Sequence[dict],
@@ -280,41 +318,46 @@ def _confirm(
     """A "yes" with something pending (D7). It runs the tool only at the end of this order.
 
     1. Another tool, or something the filter dropped: the "yes" no longer answers only what was
-       shown. Nothing runs or changes; the pending question or confirmation is repeated, after
-       the D10 line if something was dropped (author's answer to brief 10a, option (a)).
+       shown. Nothing runs and nothing of the message is applied; the pending question or
+       confirmation is repeated, after the D10 line if something was dropped (author's answer
+       to brief 10a, option (a)).
     2. D7.4: `confirms_tool` naming a tool that is not pending vetoes, before the merge ("ni
        cambia nada"). None does not block (D2).
+       In 1 and 2 the record is assessed again against `now` as in a turn without changes
+       (`_repeat_pending`): only the passing of time can change it (autodecided AT).
     3. Operations of the pending tool are merged first. A change, a rejected name or a note
        never runs: the lines are shown and the record is validated again (D4 to D7; D38).
     4. Still `collecting`: a "yes" while something is missing or invalid repeats the invalid
        lines and the question (D7.1).
-    5. D7.2: the steps are validated again and the hash of the values shown now must match
-       the stored one. Otherwise the record is assessed again, as after a change: still valid
-       -> the confirmation with the current values and the new hash; a step that stopped being
-       complete or valid -> back to `collecting` with its invalid lines and question (D7.1;
-       review 10a-1, should-fix 1).
+    5. D7.2: the steps are validated again against `now` and the hash of the values shown now
+       must match the stored one. Otherwise the record is assessed again, as after a change:
+       still valid -> the fixed line that says the values changed, then the confirmation with
+       the current values and the new hash (author's answer on note (ddd)); a step that
+       stopped being complete or valid -> back to `collecting` with its invalid lines and
+       question (D7.1; review 10a-1, should-fix 1).
     6. `_run_confirmed`.
     """
+    now = turn_input.now
     if dropped_some or any(operation["tool"] not in pending["tools"] for operation in operations):
-        return _pending_outcome(pending, [], route="confirm_other_tool", changed=False)
+        return _repeat_pending(pending, [], now, route="confirm_other_tool")
     if confirms_tool is not None and confirms_tool not in pending["tools"]:
-        return _pending_outcome(pending, [], route="confirm_vetoed", changed=False)
+        return _repeat_pending(pending, [], now, route="confirm_vetoed")
 
-    steps, merges = _merge_steps(pending, operations, message)
+    steps, merges = _merge_steps(pending, operations, turn_input.message)
     if any(merged.changes or merged.rejected or merged.notes for _, merged in merges):
-        return _after_merge(pending, steps, merges, route="confirm_merged")
+        return _after_merge(pending, steps, merges, now, route="confirm_merged")
 
     if pending["status"] != AWAITING_CONFIRMATION:
-        return _pending_outcome(pending, [], route="confirm_incomplete", changed=False)
+        return _pending_outcome(pending, [], now, route="confirm_incomplete", changed=False)
 
-    assessed = _assessment(pending["steps"])
-    if assessed["status"] != AWAITING_CONFIRMATION or assessed["confirmation_hash"] != pending.get(
-        "confirmation_hash"
-    ):
-        record = {key: value for key, value in pending.items() if key != "confirmation_hash"}
-        record.update(assessed)
-        return _pending_outcome(record, [], route="confirm_hash_changed")
-    return _run_confirmed(pending, shown_values(pending["steps"]), history)
+    record = _reassessed(pending, pending["steps"], now)
+    if record["status"] != AWAITING_CONFIRMATION:
+        return _pending_outcome(record, [], now, route="confirm_hash_changed")
+    if record["confirmation_hash"] != pending.get("confirmation_hash"):
+        outcome = _pending_outcome(record, [], now, route="confirm_hash_changed")
+        outcome.reply = f"{replies.DATA_CHANGED_LINE}\n{outcome.reply}"
+        return outcome
+    return _run_confirmed(pending, shown_values(pending["steps"], now), history)
 
 
 def _run_confirmed(record: dict, shown: list[dict], history: Sequence[dict]) -> TurnOutcome:
@@ -344,20 +387,20 @@ def _run_confirmed(record: dict, shown: list[dict], history: Sequence[dict]) -> 
     )
 
 
-def _assessment(steps: list[dict]) -> dict[str, Any]:
+def _assessment(steps: list[dict], now: datetime) -> dict[str, Any]:
     """`status`, `missing`, `invalid`, `last_question` and maybe `confirmation_hash` (D5, D7).
 
-    `missing` is only what is absent; `invalid` lists `{tool, field, cause}` without the value.
-    While something is missing or invalid, the question names every missing and invalid field
-    of each step by its label, in registry order, and never carries a collected or an allowed
-    value (D2, D14, D17); it is None when only an unchecked date or time is left (D44). When
-    every step is valid, the record awaits confirmation: the question names the actions only
-    (D43) and the hash binds the values shown (D7.2).
+    `missing` is what is absent, plus a date or a time without a part the code must not
+    complete (D5.1, D5.2); `invalid` lists `{tool, field, cause}` without the value. While
+    something is missing or invalid, the question names every missing and invalid field of each
+    step by its label, in registry order, and never carries a collected or an allowed value
+    (D2, D14, D17). When every step is valid, the record awaits confirmation: the question names
+    the actions only (D43) and the hash binds the values shown (D7.2), resolved against `now`.
     """
     missing, invalid, questions, ready = [], [], [], True
     for step in steps:
         tool = TOOLS[step["tool"]]
-        validation = validate(tool, step["args"])
+        validation = validate(tool, step["args"], now)
         ready = ready and validation.ready
         missing += validation.missing
         invalid += [
@@ -374,35 +417,31 @@ def _assessment(steps: list[dict]) -> dict[str, Any]:
             "missing": [],
             "invalid": [],
             "last_question": replies.confirmation_question([TOOLS[s["tool"]] for s in steps]),
-            "confirmation_hash": confirmation_hash(shown_values(steps)),
+            "confirmation_hash": confirmation_hash(shown_values(steps, now)),
         }
     return {
         "status": COLLECTING,
         "missing": missing,
         "invalid": invalid,
-        "last_question": " ".join(questions) or None,
+        "last_question": " ".join(questions),  # never empty: something is missing or invalid
     }
 
 
-def _closing_line(record: dict) -> str:
-    """The confirmation (values shown, then the question), the question, or a provisional
-    template.
+def _closing_line(record: dict, now: datetime) -> str:
+    """The confirmation (values shown, then the question) or the question.
 
-    The shown values are recomputed from `args`, never stored (D44). A `collecting` record
-    with no question only exists while a date or a time has no rule (task 09b, D44): every
-    other complete record awaits confirmation.
+    The shown values are recomputed from `args` against `now`, never stored (D44).
     """
     if record["status"] == AWAITING_CONFIRMATION:
-        summary = replies.confirmation_summary(shown_values(record["steps"]))
+        summary = replies.confirmation_summary(shown_values(record["steps"], now))
         return f"{summary}\n{record['last_question']}"
-    if record["last_question"]:
-        return record["last_question"]
-    return replies.DATE_TIME_NOT_CHECKED_YET
+    return record["last_question"]
 
 
 def _pending_outcome(
     record: dict,
     merges: list[tuple[ToolSpec, MergeResult]],
+    now: datetime,
     route: str,
     changed: bool = True,
 ) -> TurnOutcome:
@@ -425,7 +464,7 @@ def _pending_outcome(
     for item in invalid:
         specs = {spec.name: spec for spec in TOOLS[item["tool"]].fields}
         lines.append(replies.invalid_line(specs[item["field"]], item["cause"]))
-    lines.append(_closing_line(record))
+    lines.append(_closing_line(record, now))
 
     return TurnOutcome(
         "\n".join(lines),

@@ -3,8 +3,8 @@
 The turn node is the only place where ADK meets the pure core (D1.1, *Frontera*). Each turn it:
 1. reads the pending record from the session state (read only);
 2. calls the interpreter as a child node with `ctx.run_node` (D1: the LLM only interprets);
-3. hands the interpretation, the pending record, the message text (`TurnInput`) and the closed
-   operations (`history`, D6) to `core.turn.handle_turn`;
+3. hands the interpretation, the pending record, the message text and the moment of the turn
+   (`TurnInput`) and the closed operations (`history`, D6) to `core.turn.handle_turn`;
 4. returns exactly one `Event` with the template reply and the state change.
 
 The state is written only through that final event (`Event(state=...)` becomes
@@ -19,6 +19,7 @@ the CLI does that, so tests never see the real key.
 import json
 import logging
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 
 from google.adk import Context, Event, Workflow
@@ -160,7 +161,9 @@ def build_root_agent(interpreter: LlmAgent) -> Workflow:
         # ADK already validated `output` against the schema, so this does not fail.
         interpretation = TurnInterpretation.model_validate(output)
         # Outside the `try`: an error in the core is a bug and must surface as one.
-        turn_input = TurnInput(message=message_text(node_input))
+        # The only place in the code that reads the clock: the local time of the machine, naive
+        # (D5.1). The core validates dates and times against it and never reads it itself.
+        turn_input = TurnInput(message=message_text(node_input), now=datetime.now())
         history = ctx.state.get("history") or []  # read only: the core returns the new list
         outcome = handle_turn(pending, interpretation, turn_input, history=history)
         log_turn(

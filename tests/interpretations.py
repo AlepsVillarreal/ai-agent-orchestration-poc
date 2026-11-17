@@ -8,7 +8,12 @@ written in its message: names as whole words, text as a substring (D4: nothing i
 scenario X of D2 (a word outside the allowed values). `H1` is our own wording for case H.
 """
 
+from datetime import datetime
 from typing import Any, NamedTuple
+
+# The moment the fixed turns are read against (task 09b): Tuesday 2026-11-17, 09:00, local and
+# naive like the turn node's clock. "El viernes" is 2026-11-20 and "mañana" 2026-11-18.
+NOW = datetime(2026, 11, 17, 9, 0)
 
 
 class FixedTurn(NamedTuple):

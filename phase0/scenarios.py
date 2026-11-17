@@ -22,7 +22,7 @@ from typing import Any
 from core.interpretation import TurnInterpretation
 from core.registry import TOOLS
 from core.turn import TurnInput, handle_turn
-from tests.interpretations import FIXED
+from tests.interpretations import FIXED, NOW
 
 
 @dataclass(frozen=True)
@@ -34,10 +34,14 @@ class Scenario:
 
 
 def _core_record(first_message: str) -> dict[str, Any]:
-    """The pending record `handle_turn` creates for a first message, with nothing pending."""
+    """The pending record `handle_turn` creates for a first message, with nothing pending.
+
+    `now` is the fixed `NOW` of the tests, so the harness never reads the clock: `B1` and `F1`
+    bring no date, and the records (and the summaries D32 was measured with) do not depend on it.
+    """
     fixed = FIXED[first_message]
     interpretation = TurnInterpretation.model_validate(fixed.interpretation)
-    return handle_turn(None, interpretation, TurnInput(fixed.message)).state_delta["pending"]
+    return handle_turn(None, interpretation, TurnInput(fixed.message, NOW)).state_delta["pending"]
 
 
 def _literal_record(tools: list[str], status: str, question: str) -> dict[str, Any]:

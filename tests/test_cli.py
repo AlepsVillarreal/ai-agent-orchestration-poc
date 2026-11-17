@@ -28,7 +28,7 @@ from core.instruction import pending_summary
 from core.interpretation import TurnInterpretation
 from core.turn import TurnInput, handle_turn
 from tests.fake_llm import ScriptedLlm, system_text
-from tests.interpretations import FIXED
+from tests.interpretations import FIXED, NOW
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -58,7 +58,7 @@ async def test_chat_prints_only_replies():
     question = handle_turn(
         None,
         TurnInterpretation.model_validate(FIXED["A1"].interpretation),
-        TurnInput(FIXED["A1"].message),
+        TurnInput(FIXED["A1"].message, NOW),
     ).reply
     assert text == f"> {FIXED['A1'].message}\n{question}\n"
     assert "{" not in text and '"act"' not in text  # nothing from the interpreter
@@ -112,7 +112,7 @@ async def test_run_creates_a_session_per_run_and_continues_it(redis_url, monkeyp
         a1 = handle_turn(
             None,
             TurnInterpretation.model_validate(FIXED["A1"].interpretation),
-            TurnInput(FIXED["A1"].message),
+            TurnInput(FIXED["A1"].message, NOW),
         )
         assert first.out == f"> {FIXED['A1'].message}\n{a1.reply}\n"
 
@@ -124,7 +124,7 @@ async def test_run_creates_a_session_per_run_and_continues_it(redis_url, monkeyp
         b2 = handle_turn(
             a1.state_delta["pending"],
             TurnInterpretation.model_validate(FIXED["B2"].interpretation),
-            TurnInput(FIXED["B2"].message),
+            TurnInput(FIXED["B2"].message, NOW),
         )
         assert b2.route == "same_tool"
         assert second.out == f"> {FIXED['B2'].message}\n{b2.reply}\n"

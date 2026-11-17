@@ -1,6 +1,7 @@
 import dataclasses
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,7 @@ from core.merge import Note
 from core.registry import TOOLS
 from core.turn import TurnInput, TurnOutcome, filter_by_registry, handle_turn
 from tests.case_c_judge import read_records
-from tests.interpretations import FIXED
+from tests.interpretations import FIXED, NOW
 
 
 def fixed(key: str) -> TurnInterpretation:
@@ -23,7 +24,7 @@ def fixed(key: str) -> TurnInterpretation:
 
 def handle_fixed(pending: dict | None, key: str) -> TurnOutcome:
     """`handle_turn` on a fixed interpretation, with its own message (D4 rule 3)."""
-    return handle_turn(pending, fixed(key), TurnInput(FIXED[key].message))
+    return handle_turn(pending, fixed(key), TurnInput(FIXED[key].message, NOW))
 
 
 def interpretation(act: str, *operations: dict[str, Any]) -> TurnInterpretation:
@@ -59,14 +60,16 @@ def _all_values(value: Any) -> list[str]:
 
 def confirmation_text(record: dict) -> str:
     """What a record awaiting confirmation shows: the normalized values, then the question."""
-    summary = replies.confirmation_summary(shown_values(record["steps"]))
+    summary = replies.confirmation_summary(shown_values(record["steps"], NOW))
     return f"{summary}\n{record['last_question']}"
 
 
 # 4
 def test_unknown_tool_alone_gives_capabilities():
     outcome = handle_turn(
-        None, interpretation("request_action", op("book_flight")), TurnInput("Reserva un vuelo")
+        None,
+        interpretation("request_action", op("book_flight")),
+        TurnInput("Reserva un vuelo", NOW),
     )
 
     assert outcome.route == "R1"
@@ -83,7 +86,7 @@ def test_unknown_tool_next_to_a_known_one_adds_the_d10_line():
         op("create_ticket", description="el servidor está caído"),
     )
     outcome = handle_turn(
-        None, turn, TurnInput("Reserva un vuelo y crea un ticket: el servidor está caído")
+        None, turn, TurnInput("Reserva un vuelo y crea un ticket: el servidor está caído", NOW)
     )
 
     assert outcome.route == "R2"
@@ -98,7 +101,7 @@ def test_contract_filter_drops_args_of_other_tools():
         "request_action", op("create_ticket", description="el servidor", recipient="Carlos")
     )
     message = "Crea un ticket del servidor y avísale a Carlos"
-    record = handle_turn(None, turn, TurnInput(message)).state_delta["pending"]
+    record = handle_turn(None, turn, TurnInput(message, NOW)).state_delta["pending"]
 
     assert record["steps"][0]["args"] == {"description": "el servidor"}
 
@@ -125,7 +128,9 @@ def test_two_operations_of_one_tool_follow_d11():
         op("create_ticket", "plausible", description="la red"),
     )
     for pending in (None, a1_pending()):
-        outcome = handle_turn(pending, turn, TurnInput("Crea dos tickets: el servidor y la red"))
+        outcome = handle_turn(
+            pending, turn, TurnInput("Crea dos tickets: el servidor y la red", NOW)
+        )
         assert outcome.route == "d11"
         assert outcome.reply == replies.ONE_PER_TOOL
         assert outcome.state_delta == {}
@@ -141,14 +146,14 @@ def test_nothing_pending_acts():
         interpretation("provide_info"),
     ]
     for turn in no_pending:
-        outcome = handle_turn(None, turn, TurnInput("Sí, hazlo"))
+        outcome = handle_turn(None, turn, TurnInput("Sí, hazlo", NOW))
         assert outcome.reply == replies.NO_PENDING_OPERATION, turn.act
         assert outcome.state_delta == {}
 
     for act in ("question", "other"):
         for operations in ([], [op("create_ticket", description="el servidor")]):
             outcome = handle_turn(
-                None, interpretation(act, *operations), TurnInput("¿Y el servidor?")
+                None, interpretation(act, *operations), TurnInput("¿Y el servidor?", NOW)
             )
             assert outcome.route == "template", (act, operations)
             assert outcome.reply == replies.capabilities()
@@ -166,7 +171,7 @@ def test_r3_r4_r5_do_not_start_anything_yet():
         (only_plausible, "Algo con Carlos", "R5"),
     )
     for turn, message, route in turns:
-        outcome = handle_turn(None, turn, TurnInput(message))
+        outcome = handle_turn(None, turn, TurnInput(message, NOW))
         assert outcome.route == route
         assert outcome.state_delta == {}
 
@@ -244,7 +249,7 @@ def test_pending_args_leave_absent_values_out():
             duration_minutes=0,
         ),
     )
-    record = handle_turn(None, turn, TurnInput("Una reunión con Ana")).state_delta["pending"]
+    record = handle_turn(None, turn, TurnInput("Una reunión con Ana", NOW)).state_delta["pending"]
 
     assert record["steps"][0]["args"] == {"attendees": ["Ana"], "duration_minutes": 0}
     assert record["missing"] == ["title", "date", "time"]
@@ -306,7 +311,7 @@ def _lines(reply: str) -> list[str]:
 # 2
 def test_r2_anchors_and_merges_a_new_flow():
     meeting = interpretation("request_action", op("schedule_meeting", attendees_add=["Ana"]))
-    outcome = handle_turn(None, meeting, TurnInput("Agenda una reunión con Ana"))
+    outcome = handle_turn(None, meeting, TurnInput("Agenda una reunión con Ana", NOW))
     record = outcome.state_delta["pending"]
 
     assert record["steps"][0]["args"] == {"attendees": ["Ana"]}
@@ -319,7 +324,7 @@ def test_r2_anchors_and_merges_a_new_flow():
         "request_action",
         op("create_ticket", description="el servidor está caído", assignee="Pedro"),
     )
-    outcome = handle_turn(None, ticket, TurnInput("Crea un ticket, el servidor está caído"))
+    outcome = handle_turn(None, ticket, TurnInput("Crea un ticket, el servidor está caído", NOW))
     record = outcome.state_delta["pending"]
 
     assert outcome.route == "R2"
@@ -356,7 +361,7 @@ def _as(key: str, act: str, certainty: str) -> TurnInterpretation:
 @pytest.mark.parametrize("act", ["provide_info", "request_action"])
 def test_same_tool_merges_and_asks_for_the_rest(act, certainty):
     pending, _ = run_conversation("B1")
-    outcome = handle_turn(pending, _as("B2", act, certainty), TurnInput(FIXED["B2"].message))
+    outcome = handle_turn(pending, _as("B2", act, certainty), TurnInput(FIXED["B2"].message, NOW))
     record = outcome.state_delta["pending"]
     args = record["steps"][0]["args"]
 
@@ -415,7 +420,7 @@ def test_case_b_until_complete(monkeypatch):
 def test_changes_are_shown():
     ticket, _ = run_conversation("B1", "B2")
     medium = interpretation("provide_info", op("create_ticket", priority="media"))
-    outcome = handle_turn(ticket, medium, TurnInput("Mejor media"))
+    outcome = handle_turn(ticket, medium, TurnInput("Mejor media", NOW))
 
     assert outcome.state_delta["pending"]["steps"][0]["args"]["priority"] == "media"
     assert [(c.field, c.kind, c.old, c.new) for c in outcome.changes] == [
@@ -430,7 +435,7 @@ def test_changes_are_shown():
 
     for act in ("provide_info", "request_action"):
         f1, _ = run_conversation("F1")
-        outcome = handle_turn(f1, _as("L2", act, "explicit"), TurnInput(FIXED["L2"].message))
+        outcome = handle_turn(f1, _as("L2", act, "explicit"), TurnInput(FIXED["L2"].message, NOW))
         record = outcome.state_delta["pending"]
         assert "attendees" not in record["steps"][0]["args"], act
         assert "attendees" in record["missing"], act
@@ -459,7 +464,7 @@ def test_new_flow_note_is_true():
     turn = interpretation(
         "request_action", op("schedule_meeting", attendees=["Ana"], attendees_add=["ana"])
     )
-    outcome = handle_turn(None, turn, TurnInput("Agenda una reunión con Ana"))
+    outcome = handle_turn(None, turn, TurnInput("Agenda una reunión con Ana", NOW))
     record = outcome.state_delta["pending"]
 
     assert record["steps"][0]["args"] == {"attendees": ["Ana"]}
@@ -474,7 +479,7 @@ def test_new_flow_note_is_true():
 @pytest.mark.parametrize("act", ["provide_info", "request_action"])
 def test_pending_without_operations_repeats_the_question(act):
     pending = a1_pending()
-    outcome = handle_turn(pending, interpretation(act), TurnInput("Eso"))
+    outcome = handle_turn(pending, interpretation(act), TurnInput("Eso", NOW))
 
     assert outcome.reply == pending["last_question"]
     assert outcome.state_delta == {}
@@ -489,12 +494,12 @@ def test_pending_and_unknown_tool_adds_the_d10_line():
     pending = a1_pending()
     flight = interpretation("request_action", op("book_flight"))
 
-    outcome = handle_turn(pending, flight, TurnInput("Mejor reserva un vuelo"))
+    outcome = handle_turn(pending, flight, TurnInput("Mejor reserva un vuelo", NOW))
 
     assert outcome.reply == f"{replies.UNKNOWN_TOOL_LINE}\n{pending['last_question']}"
     assert outcome.state_delta == {}
 
-    nothing = handle_turn(pending, interpretation("request_action"), TurnInput("Mejor eso"))
+    nothing = handle_turn(pending, interpretation("request_action"), TurnInput("Mejor eso", NOW))
     assert nothing.reply == pending["last_question"]  # no D10 line: nothing was dropped
     assert nothing.state_delta == {}
 
@@ -559,7 +564,7 @@ def test_same_tool_needs_a_collecting_record():
 
 _TICKET_FIELDS = {spec.name: spec for spec in TOOLS["create_ticket"].fields}
 
-# A meeting with every field (the date and the time have no rule until task 09b).
+# A meeting with every field. Read against `NOW`, its date is 2026-11-20 (task 09b).
 _COMPLETE_MEETING_MESSAGE = (
     "Agenda la revisión del servidor el 20 de noviembre a las 10:30, 30 minutos, con Juan y Ana"
 )
@@ -606,7 +611,7 @@ def test_invalid_and_missing_in_one_reply():
 def test_correction_clears_invalid():
     pending = handle_fixed(None, "X1").state_delta["pending"]
     high = interpretation("provide_info", op("create_ticket", priority="alta"))
-    outcome = handle_turn(pending, high, TurnInput("Alta"))
+    outcome = handle_turn(pending, high, TurnInput("Alta", NOW))
     record = outcome.state_delta["pending"]
 
     assert [(c.field, c.kind, c.old, c.new) for c in outcome.changes] == [
@@ -620,7 +625,7 @@ def test_correction_clears_invalid():
     complete = handle_fixed(None, "H1").state_delta["pending"]
     assert complete["invalid"] == [] and complete["status"] == "awaiting_confirmation"
     urgent = interpretation("provide_info", op("create_ticket", priority="urgente"))
-    outcome = handle_turn(complete, urgent, TurnInput("Mejor urgente"))
+    outcome = handle_turn(complete, urgent, TurnInput("Mejor urgente", NOW))
     record = outcome.state_delta["pending"]
 
     assert record["steps"][0]["args"]["priority"] == "urgente"  # a new invalid value replaces
@@ -638,7 +643,7 @@ def test_correction_clears_invalid():
 @pytest.mark.parametrize("minutes", [0, 481])
 def test_duration_out_of_range(minutes):
     outcome = handle_turn(
-        None, _meeting(duration_minutes=minutes), TurnInput(_COMPLETE_MEETING_MESSAGE)
+        None, _meeting(duration_minutes=minutes), TurnInput(_COMPLETE_MEETING_MESSAGE, NOW)
     )
     record = outcome.state_delta["pending"]
 
@@ -666,21 +671,8 @@ def test_repeated_invalid_request_changes_nothing():
     assert outcome.invalid == pending["invalid"]
 
 
-# 14 (finding 3 of backlog-06: a date or a time is never valid before task 09b)
-def test_complete_meeting_waits_for_dates():
-    outcome = handle_turn(None, _meeting(), TurnInput(_COMPLETE_MEETING_MESSAGE))
-    record = outcome.state_delta["pending"]
-
-    assert record["status"] == "collecting"
-    assert record["missing"] == []
-    assert record["invalid"] == []
-    assert record["last_question"] is None
-    assert outcome.reply.endswith(replies.DATE_TIME_NOT_CHECKED_YET)
-    assert "confirmation_hash" not in record  # never awaits confirmation before task 09b
-
-    again = handle_turn(record, _meeting(), TurnInput(_COMPLETE_MEETING_MESSAGE))
-    assert again.state_delta == {}
-    assert again.reply == replies.DATE_TIME_NOT_CHECKED_YET
+# 14 became test 10 of brief 09b (`test_complete_meeting_awaits_confirmation`): a complete
+# meeting now awaits confirmation instead of closing with the provisional template of 09a.
 
 
 # Brief 10a ------------------------------------------------------------------------------------
@@ -731,7 +723,7 @@ def test_complete_request_awaits_confirmation(monkeypatch, key, shown, canonical
     assert record["status"] == "awaiting_confirmation"
     assert record["missing"] == [] and record["invalid"] == []
     assert re.fullmatch(r"[0-9a-f]{32}", record["operation_id"])
-    assert record["confirmation_hash"] == confirmation_hash(shown_values(record["steps"]))
+    assert record["confirmation_hash"] == confirmation_hash(shown_values(record["steps"], NOW))
 
     lines = _lines(outcome.reply)
     assert shown in lines  # the Spanish label of the normalized value
@@ -770,7 +762,7 @@ def test_yes_runs_the_pending_operation_once(monkeypatch, recipient):
     g1 = json.loads(json.dumps(FIXED["G1"].interpretation))
     g1["operations"][0]["args"]["recipient"] = recipient
     pending = handle_turn(
-        None, TurnInterpretation.model_validate(g1), TurnInput(FIXED["G1"].message)
+        None, TurnInterpretation.model_validate(g1), TurnInput(FIXED["G1"].message, NOW)
     ).state_delta["pending"]
     assert pending["steps"][0]["args"]["recipient"] == recipient  # kept as said (D4 rule 7)
 
@@ -809,7 +801,7 @@ def test_yes_with_a_change_never_runs(monkeypatch):
 
     pending = g1_pending()
     sms = confirm(op("send_notification", channel="SMS"))
-    outcome = handle_turn(pending, sms, TurnInput("Sí, pero por SMS"))
+    outcome = handle_turn(pending, sms, TurnInput("Sí, pero por SMS", NOW))
     record = outcome.state_delta["pending"]
 
     assert outcome.route == "confirm_merged"
@@ -821,7 +813,7 @@ def test_yes_with_a_change_never_runs(monkeypatch):
 
     pending = handle_fixed(None, "H1").state_delta["pending"]
     urgent = confirm(op("create_ticket", priority="urgente"))
-    outcome = handle_turn(pending, urgent, TurnInput("Sí, pero con prioridad urgente"))
+    outcome = handle_turn(pending, urgent, TurnInput("Sí, pero con prioridad urgente", NOW))
     record = outcome.state_delta["pending"]
 
     assert record["status"] == "collecting"
@@ -839,7 +831,7 @@ def test_yes_with_a_resent_name_is_rejected(monkeypatch):
     pending = g1_pending()
     turn = confirm(op("send_notification", recipient="Carlos"))
 
-    outcome = handle_turn(pending, turn, TurnInput(FIXED["G2"].message))
+    outcome = handle_turn(pending, turn, TurnInput(FIXED["G2"].message, NOW))
 
     assert outcome.reply == f"{replies.REJECTED_NAME_LINE}\n{confirmation_text(pending)}"
     assert outcome.state_delta == {}
@@ -856,7 +848,7 @@ def test_confirms_tool_veto(monkeypatch, confirms_tool, runs):
     calls = record_tools(monkeypatch)
     pending = g1_pending()
 
-    outcome = handle_turn(pending, confirm(confirms_tool=confirms_tool), TurnInput("Sí"))
+    outcome = handle_turn(pending, confirm(confirms_tool=confirms_tool), TurnInput("Sí", NOW))
 
     if runs:
         assert calls["send_notification"] == [G1_NORMALIZED]
@@ -878,7 +870,9 @@ def test_hash_mismatch_asks_again(monkeypatch):
 
     assert nothing_ran(calls)
     assert outcome.route == "confirm_hash_changed"
-    assert outcome.reply == confirmation_text(pending)
+    # Task 09b, author's answer on note (ddd): the record is still valid, so a fixed line says
+    # why the confirmation is shown again.
+    assert outcome.reply == f"{replies.DATA_CHANGED_LINE}\n{confirmation_text(pending)}"
     assert outcome.state_delta == {"pending": pending}  # the recomputed hash is stored
 
     again = handle_fixed(outcome.state_delta["pending"], "G2")  # the next "yes" counts
@@ -905,7 +899,7 @@ def test_correction_while_awaiting(monkeypatch):
     pending = g1_pending()
     push = interpretation("provide_info", op("send_notification", channel="push"))
 
-    outcome = handle_turn(pending, push, TurnInput("Mejor por push"))
+    outcome = handle_turn(pending, push, TurnInput("Mejor por push", NOW))
     record = outcome.state_delta["pending"]
 
     assert outcome.route == "same_tool"
@@ -923,19 +917,19 @@ def test_yes_with_another_tool_never_runs(monkeypatch):
 
     ticket = confirm(op("create_ticket", description="revisar el servidor"))
     message = "Sí, y crea un ticket para revisar el servidor"
-    outcome = handle_turn(pending, ticket, TurnInput(message))
+    outcome = handle_turn(pending, ticket, TurnInput(message, NOW))
     assert outcome.route == "confirm_other_tool"
     assert outcome.state_delta == {}
     assert outcome.reply == confirmation_text(pending)
 
     pizza = confirm(op("send_notification"), op("order_pizza"))
-    outcome = handle_turn(pending, pizza, TurnInput("Sí, y pide una pizza"))
+    outcome = handle_turn(pending, pizza, TurnInput("Sí, y pide una pizza", NOW))
     assert outcome.state_delta == {}
     assert outcome.reply == f"{replies.UNKNOWN_TOOL_LINE}\n{confirmation_text(pending)}"
 
     collecting = a1_pending()
     meeting = confirm(op("schedule_meeting", attendees=["Juan"]))
-    outcome = handle_turn(collecting, meeting, TurnInput("Sí, y agenda una reunión con Juan"))
+    outcome = handle_turn(collecting, meeting, TurnInput("Sí, y agenda una reunión con Juan", NOW))
     assert outcome.state_delta == {}
     assert outcome.reply == collecting["last_question"]
     assert nothing_ran(calls)
@@ -946,7 +940,7 @@ def test_unknown_tool_while_awaiting_adds_the_d10_line():
     pending = g1_pending()
     flight = interpretation("provide_info", op("book_flight"))
 
-    outcome = handle_turn(pending, flight, TurnInput("Y reserva un vuelo"))
+    outcome = handle_turn(pending, flight, TurnInput("Y reserva un vuelo", NOW))
 
     assert outcome.reply == f"{replies.UNKNOWN_TOOL_LINE}\n{confirmation_text(pending)}"
     assert outcome.state_delta == {}
@@ -987,24 +981,34 @@ def test_hash_mismatch_with_an_invalid_value_goes_back_to_collecting(monkeypatch
 
 
 # Should-fix 2 (what D4 requires of D7): a `confirm` whose merge gives only a note never counts.
-# Only a list field gives notes, and a meeting cannot await confirmation before task 09b, so the
-# note is checked on a `collecting` meeting: without the note in the condition the turn would
-# take `confirm_incomplete` and drop the note line.
+# Task 09b (note (ccc); D4 to D7): checked where it matters, on a meeting with Juan that awaits
+# confirmation. Without the note in the condition, this "yes" would run the meeting.
 def test_yes_with_a_note_never_counts(monkeypatch):
     calls = record_tools(monkeypatch)
-    pending = handle_fixed(None, "F1").state_delta["pending"]  # a meeting with Juan
+    message = "Agenda la revisión del servidor el 20 de noviembre a las 10:30, 30 minutos, con Juan"
+    with_juan = _meeting(attendees=["Juan"])
+    pending = handle_turn(None, with_juan, TurnInput(message, NOW)).state_delta["pending"]
+    assert pending["status"] == "awaiting_confirmation"
     turn = confirm(op("schedule_meeting", attendees_remove=["Ana"]))
 
-    outcome = handle_turn(pending, turn, TurnInput("Sí, y quita a Ana"))
+    outcome = handle_turn(pending, turn, TurnInput("Sí, y quita a Ana", NOW))
 
     attendees = TOOLS["schedule_meeting"].fields[4]
     assert outcome.route == "confirm_merged"
     assert outcome.state_delta == {}
-    assert _lines(outcome.reply) == [
-        replies.note_line(attendees, Note("attendees", "remove_absent", "Ana")),
-        pending["last_question"],
-    ]
+    assert outcome.reply == "\n".join(
+        [
+            replies.note_line(attendees, Note("attendees", "remove_absent", "Ana")),
+            confirmation_text(pending),
+        ]
+    )
     assert nothing_ran(calls)
+
+    yes = handle_fixed(pending, "G2")  # a plain "yes" afterwards runs the meeting once
+    assert yes.route == "confirmed"
+    [args] = calls["schedule_meeting"]
+    assert (args["date"], args["time"]) == ("2026-11-20", "10:30")
+    assert args["attendees"] == ["Juan"]
 
 
 # Review note 4 (autodecided AJ): a "yes" that repeats a stored value, or a name written in the
@@ -1016,7 +1020,7 @@ def test_yes_with_a_note_never_counts(monkeypatch):
 def test_yes_repeating_a_stored_value_counts(monkeypatch, args, message):
     calls = record_tools(monkeypatch)
     turn = confirm(op("send_notification", **args))
-    outcome = handle_turn(g1_pending(), turn, TurnInput(message))
+    outcome = handle_turn(g1_pending(), turn, TurnInput(message, NOW))
 
     assert outcome.route == "confirmed"
     assert calls["send_notification"] == [G1_NORMALIZED]
@@ -1097,10 +1101,10 @@ def test_confirmed_operation_goes_to_history(monkeypatch, recipient):
     g1 = json.loads(json.dumps(FIXED["G1"].interpretation))
     g1["operations"][0]["args"]["recipient"] = recipient
     pending = handle_turn(
-        None, TurnInterpretation.model_validate(g1), TurnInput(FIXED["G1"].message)
+        None, TurnInterpretation.model_validate(g1), TurnInput(FIXED["G1"].message, NOW)
     ).state_delta["pending"]
 
-    outcome = handle_turn(pending, fixed("G2"), TurnInput(FIXED["G2"].message), history=())
+    outcome = handle_turn(pending, fixed("G2"), TurnInput(FIXED["G2"].message, NOW), history=())
 
     entry = {
         "operation_id": pending["operation_id"],
@@ -1126,7 +1130,9 @@ def test_history_keeps_the_last_ten(monkeypatch, before, after):
     received = json.loads(json.dumps(history))
     pending = g1_pending()
 
-    outcome = handle_turn(pending, fixed("G2"), TurnInput(FIXED["G2"].message), history=history)
+    outcome = handle_turn(
+        pending, fixed("G2"), TurnInput(FIXED["G2"].message, NOW), history=history
+    )
 
     new = outcome.state_delta["history"]
     assert len(new) == after
@@ -1141,12 +1147,14 @@ def test_only_a_confirmed_yes_writes_history():
     outcomes = []
     for pending in (None, a1_pending()):
         outcomes += [
-            handle_turn(pending, fixed(key), TurnInput(FIXED[key].message), history=history)
+            handle_turn(pending, fixed(key), TurnInput(FIXED[key].message, NOW), history=history)
             for key in FIXED
         ]
     pending = None
     for key in ("B1", "B2", "B3"):
-        outcome = handle_turn(pending, fixed(key), TurnInput(FIXED[key].message), history=history)
+        outcome = handle_turn(
+            pending, fixed(key), TurnInput(FIXED[key].message, NOW), history=history
+        )
         pending = outcome.state_delta.get("pending", pending)
         outcomes.append(outcome)
 
@@ -1201,7 +1209,7 @@ def test_measured_l4_is_joined(act, certainty):
     )
     pending = f1_pending()
 
-    outcome = handle_turn(pending, turn, TurnInput(message))
+    outcome = handle_turn(pending, turn, TurnInput(message, NOW))
     single = handle_fixed(pending, "L4")
 
     assert outcome.route == "same_tool"
@@ -1219,7 +1227,7 @@ def test_split_ops_ignore_absent_keys():
     )
     message = "Ponle de título Revisión, quita a Juan y agrega a Ana"
 
-    outcome = handle_turn(f1_pending(), turn, TurnInput(message))
+    outcome = handle_turn(f1_pending(), turn, TurnInput(message, NOW))
     args = outcome.state_delta["pending"]["steps"][0]["args"]
 
     assert outcome.route == "same_tool"
@@ -1237,7 +1245,7 @@ def test_split_ops_while_awaiting_confirmation(monkeypatch):
         op("create_ticket", assignee="Ana"),
     )
 
-    outcome = handle_turn(pending, turn, TurnInput("Mejor prioridad media y asígnalo a Ana"))
+    outcome = handle_turn(pending, turn, TurnInput("Mejor prioridad media y asígnalo a Ana", NOW))
     record = outcome.state_delta["pending"]
     args = record["steps"][0]["args"]
 
@@ -1282,7 +1290,7 @@ def test_split_ops_while_awaiting_confirmation(monkeypatch):
 )
 def test_overlapping_split_ops_follow_d11(operations, message):
     outcome = handle_turn(
-        f1_pending(), interpretation("provide_info", *operations), TurnInput(message)
+        f1_pending(), interpretation("provide_info", *operations), TurnInput(message, NOW)
     )
 
     assert outcome.route == "d11"
@@ -1339,9 +1347,214 @@ def test_split_ops_outside_same_tool_follow_d11(monkeypatch, pending_key, turn, 
     if pending_key is not None:
         pending = handle_fixed(None, pending_key).state_delta["pending"]
 
-    outcome = handle_turn(pending, turn, TurnInput(message))
+    outcome = handle_turn(pending, turn, TurnInput(message, NOW))
 
     assert outcome.route == "d11"
     assert outcome.reply == replies.ONE_PER_TOOL
     assert outcome.state_delta == {}
     assert nothing_ran(calls)
+
+
+# Brief 09b ------------------------------------------------------------------------------------
+
+
+# 8 (case D, TASK.md lines 186-200 and 361-371; notes (yy) and (ii))
+def test_case_d_reports_date_and_time():
+    outcome = handle_fixed(None, "D1")
+    record = outcome.state_delta["pending"]
+
+    assert record["status"] == "collecting"
+    assert record["invalid"] == [
+        {"tool": "schedule_meeting", "field": "date", "cause": "nonexistent"},
+        {"tool": "schedule_meeting", "field": "time", "cause": "bad_format"},
+    ]
+    assert record["missing"] == ["title", "duration_minutes", "attendees"]
+    assert outcome.invalid == record["invalid"]  # for the log
+
+    lines = _lines(outcome.reply)
+    date_line = next(i for i, line in enumerate(lines) if "La fecha indicada no existe" in line)
+    time_line = next(
+        i for i, line in enumerate(lines) if "La hora está fuera del formato válido" in line
+    )
+    assert (
+        lines.index("Anoté la fecha: día 40, mes 11.")
+        < lines.index("Anoté la hora: 25:90.")
+        < date_line
+        < time_line
+        < len(lines) - 1
+    )
+    assert lines[-1] == record["last_question"]
+
+    question = record["last_question"]
+    assert "la fecha" in question and "la hora" in question
+    for number in ("40", "25", "90"):
+        assert number not in question, number
+
+
+# 9 (D5.1: a weekday is its next occurrence; fixed `W1`, "el viernes a las 10")
+def test_weekday_meeting():
+    pending = handle_fixed(None, "W1").state_delta["pending"]
+    assert pending["missing"] == ["title", "duration_minutes"]
+    assert pending["invalid"] == []
+
+    rest = interpretation(
+        "provide_info", op("schedule_meeting", title="Planeación", duration_minutes=30)
+    )
+    outcome = handle_turn(pending, rest, TurnInput("Planeación, 30 minutos", NOW))
+    record = outcome.state_delta["pending"]
+
+    assert record["status"] == "awaiting_confirmation"
+    # Review 09b-2, note 4: after a merge with changes, the hash binds what was shown at `now`.
+    assert record["confirmation_hash"] == confirmation_hash(shown_values(record["steps"], NOW))
+    lines = _lines(outcome.reply)
+    assert "- La fecha: 2026-11-20" in lines
+    assert "- La hora: 10:00" in lines
+
+
+# 10 (replaces test_complete_meeting_waits_for_dates of brief 09a)
+def test_complete_meeting_awaits_confirmation(monkeypatch):
+    calls = record_tools(monkeypatch)
+    outcome = handle_turn(None, _meeting(), TurnInput(_COMPLETE_MEETING_MESSAGE, NOW))
+    record = outcome.state_delta["pending"]
+
+    assert record["status"] == "awaiting_confirmation"
+    assert record["confirmation_hash"] == confirmation_hash(shown_values(record["steps"], NOW))
+    lines = _lines(outcome.reply)
+    assert "- La fecha: 2026-11-20" in lines
+    assert "- La hora: 10:30" in lines
+    assert outcome.reply.endswith(confirmation_text(record))
+
+    again = handle_turn(record, _meeting(), TurnInput(_COMPLETE_MEETING_MESSAGE, NOW))
+    assert again.route == "same_tool"
+    assert again.state_delta == {}
+    assert again.reply == confirmation_text(record)
+    assert nothing_ran(calls)
+
+
+_TOMORROW_MESSAGE = "Agenda la revisión del servidor mañana a las 10, 30 minutos, con Juan y Ana"
+_TODAY_MESSAGE = "Agenda la revisión del servidor hoy a las 10, 30 minutos, con Juan y Ana"
+
+
+# 12 (D7.2; note (ddd), author's answer: option (a))
+def test_tomorrow_changes_the_hash_on_the_next_day(monkeypatch):
+    calls = record_tools(monkeypatch)
+    tomorrow = _meeting(date={"relative_days": 1}, time={"hour": 10})
+    pending = handle_turn(None, tomorrow, TurnInput(_TOMORROW_MESSAGE, NOW)).state_delta["pending"]
+    assert pending["status"] == "awaiting_confirmation"
+
+    next_day = datetime(2026, 11, 18, 8, 0)
+    outcome = handle_turn(pending, fixed("G2"), TurnInput(FIXED["G2"].message, next_day))
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "confirm_hash_changed"
+    assert record["status"] == "awaiting_confirmation"
+    assert record["confirmation_hash"] != pending["confirmation_hash"]
+    assert record["operation_id"] == pending["operation_id"]
+    assert outcome.reply.startswith(f"{replies.DATA_CHANGED_LINE}\n")
+    # Review 09b-2, note 3: the exact wording the author approved (decision A).
+    assert replies.DATA_CHANGED_LINE == (
+        "Los datos cambiaron desde que te los mostré; revísalos antes de confirmar."
+    )
+    assert "- La fecha: 2026-11-19" in _lines(outcome.reply)
+    assert nothing_ran(calls)
+
+    again = handle_turn(record, fixed("G2"), TurnInput(FIXED["G2"].message, next_day))
+    assert again.route == "confirmed"
+    [args] = calls["schedule_meeting"]
+    assert args["date"] == "2026-11-19"
+    assert args["time"] == "10:00"
+
+
+# 13 (decision F of brief 09b): a time that passed while the record waited
+def test_time_that_passed_while_pending(monkeypatch):
+    calls = record_tools(monkeypatch)
+    today_at_10 = _meeting(date={"relative_days": 0}, time={"hour": 10})
+    pending = handle_turn(None, today_at_10, TurnInput(_TODAY_MESSAGE, NOW)).state_delta["pending"]
+    assert pending["status"] == "awaiting_confirmation"
+    later = datetime(2026, 11, 17, 10, 30)
+
+    outcome = handle_turn(pending, today_at_10, TurnInput(_TODAY_MESSAGE, later))
+    record = outcome.state_delta["pending"]  # a KeyError here: the no-change branch kept {}
+
+    assert outcome.route == "same_tool"
+    assert outcome.changes == []
+    assert record["status"] == "collecting"
+    assert "confirmation_hash" not in record
+    assert record["invalid"] == [{"tool": "schedule_meeting", "field": "time", "cause": "past"}]
+    assert record["missing"] == []
+    lines = _lines(outcome.reply)
+    assert "La hora indicada ya pasó." in lines
+    assert lines[-1] == record["last_question"]
+    assert "la hora" in record["last_question"]
+
+    yes = handle_turn(pending, fixed("G2"), TurnInput(FIXED["G2"].message, later))
+    assert yes.route == "confirm_hash_changed"
+    assert yes.state_delta["pending"]["status"] == "collecting"
+    assert not yes.reply.startswith(replies.DATA_CHANGED_LINE)  # the invalid line explains it
+    assert nothing_ran(calls)
+
+
+# Review 09b-1 ---------------------------------------------------------------------------------
+
+
+# Should-fix 1 (autodecided AT): a "yes" that brings another tool (D45) or is vetoed by
+# `confirms_tool` (D7.4) applies nothing of the message, but the record is assessed again against
+# `now` as decision F does. "Hoy a las 10" confirmed at 09:00 and that "yes" at 10:30: the reply
+# never shows a confirmation without its time line; it reports the time and asks for it.
+@pytest.mark.parametrize(
+    ("turn", "message", "route"),
+    [
+        (
+            confirm(op("create_ticket", description="revisar el servidor")),
+            "Sí, y crea un ticket para revisar el servidor",
+            "confirm_other_tool",
+        ),
+        (confirm(confirms_tool="create_ticket"), "Sí, crea el ticket", "confirm_vetoed"),
+    ],
+)
+def test_turned_away_yes_reassesses_against_now(monkeypatch, turn, message, route):
+    calls = record_tools(monkeypatch)
+    today_at_10 = _meeting(date={"relative_days": 0}, time={"hour": 10})
+    pending = handle_turn(None, today_at_10, TurnInput(_TODAY_MESSAGE, NOW)).state_delta["pending"]
+    later = datetime(2026, 11, 17, 10, 30)
+
+    outcome = handle_turn(pending, turn, TurnInput(message, later))
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == route
+    assert record["status"] == "collecting"
+    assert "confirmation_hash" not in record
+    assert record["invalid"] == [{"tool": "schedule_meeting", "field": "time", "cause": "past"}]
+    assert record["steps"] == pending["steps"]  # nothing of the message got in
+    lines = _lines(outcome.reply)
+    assert "La hora indicada ya pasó." in lines
+    assert lines[-1] == record["last_question"]
+    assert not any(line.startswith("Voy a") for line in lines)  # no confirmation without time
+    assert nothing_ran(calls)
+
+    # At 09:30 nothing has expired: the state stays as it was (D45, D7.4).
+    still = handle_turn(pending, turn, TurnInput(message, datetime(2026, 11, 17, 9, 30)))
+    assert still.route == route
+    assert still.state_delta == {}
+    assert still.reply == confirmation_text(pending)
+
+
+# Should-fix 2, item 6 (decision C): the wording of `mismatch` and of a past date in a reply.
+@pytest.mark.parametrize(
+    ("date", "line"),
+    [
+        (
+            {"weekday": "jueves", "day": 27, "month": 11},
+            "Las partes de la fecha que indicaste no dan el mismo día.",
+        ),
+        ({"day": 10, "month": 11, "year": 2026}, "La fecha indicada ya pasó."),
+    ],
+)
+def test_date_invalid_lines_in_the_reply(date, line):
+    outcome = handle_turn(None, _meeting(date=date), TurnInput(_COMPLETE_MEETING_MESSAGE, NOW))
+    record = outcome.state_delta["pending"]
+
+    assert record["status"] == "collecting"
+    lines = _lines(outcome.reply)
+    assert line in lines
+    assert lines[-1] == record["last_question"] == "Para programar una reunión necesito la fecha."

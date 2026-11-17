@@ -8,16 +8,23 @@ the hash is kept in the record, so a "yes" can be checked against what the user 
 
 import hashlib
 import json
+from datetime import datetime
 from typing import Any
 
 from core.registry import TOOLS
 from core.validation import validate
 
 
-def shown_values(steps: list[dict]) -> list[dict[str, Any]]:
-    """`[{tool, normalized}]` per step, in step order: what the confirmation shows (D7.1)."""
+def shown_values(steps: list[dict], now: datetime) -> list[dict[str, Any]]:
+    """`[{tool, normalized}]` per step, in step order: what the confirmation shows (D7.1).
+
+    A date is resolved against `now`, so "mañana" shows (and the hash binds) its ISO date.
+    """
     return [
-        {"tool": step["tool"], "normalized": validate(TOOLS[step["tool"]], step["args"]).normalized}
+        {
+            "tool": step["tool"],
+            "normalized": validate(TOOLS[step["tool"]], step["args"], now).normalized,
+        }
         for step in steps
     ]
 
@@ -26,8 +33,8 @@ def confirmation_hash(shown: list[dict[str, Any]]) -> str:
     """D7.2: sha256 of the canonical JSON of the shown values (`sort_keys`, no ASCII escapes).
 
     A "yes" counts only if the hash recomputed when it arrives is the same: a value that
-    changed between the confirmation and the "yes" (a date resolved on another day, task 09b)
-    asks again instead of running.
+    changed between the confirmation and the "yes" (a "mañana" resolved after midnight, which
+    is another ISO date) asks again instead of running.
     """
     canonical = json.dumps(shown, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

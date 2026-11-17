@@ -21,7 +21,7 @@ from core.interpretation import TurnInterpretation
 from core.registry import TOOLS
 from core.turn import TurnInput, handle_turn
 from tests.fake_llm import ScriptedLlm, event_text, quota_error, reply_events, run_turn, system_text
-from tests.interpretations import FIXED
+from tests.interpretations import FIXED, NOW
 
 APP, USER = "assistant", "test"
 
@@ -46,14 +46,14 @@ async def test_state_survives_reload_from_redis(redis_url):
     a1_outcome = handle_turn(
         None,
         TurnInterpretation.model_validate(FIXED["A1"].interpretation),
-        TurnInput(FIXED["A1"].message),
+        TurnInput(FIXED["A1"].message, NOW),
     )
     record = a1_outcome.state_delta["pending"]
     # Task 08: B2 merges into the reloaded record (*Misma tool*).
     b2_outcome = handle_turn(
         record,
         TurnInterpretation.model_validate(FIXED["B2"].interpretation),
-        TurnInput(FIXED["B2"].message),
+        TurnInput(FIXED["B2"].message, NOW),
     )
 
     first_client, second_client = new_client(redis_url), new_client(redis_url)

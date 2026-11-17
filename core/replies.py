@@ -38,11 +38,10 @@ MODEL_UNAVAILABLE = (
 # D4 rule 9: a name not written in the message was dropped. Fixed, so it never shows the name.
 REJECTED_NAME_LINE = "No tomé en cuenta un nombre que no aparece escrito en tu mensaje."
 
-# Provisional: every field is in, but a date or a time has no rule yet (task 09b replaces it).
-# It names no tool, so it holds for any step with a `date` or `time` field.
-DATE_TIME_NOT_CHECKED_YET = (
-    "Tengo los datos; todavía no puedo validar fechas ni horas en esta versión."
-)
+# D7.2 and the author's answer on note (ddd): a "yes" arrived, the values shown now differ from
+# the ones the hash bound ("mañana" after midnight) and the record is still valid, so the
+# confirmation is shown again after this line instead of running.
+DATA_CHANGED_LINE = "Los datos cambiaron desde que te los mostré; revísalos antes de confirmar."
 
 
 def join_es(items: list[str], last_word: str = "y") -> str:
@@ -81,6 +80,16 @@ def invalid_line(spec: FieldSpec, cause: Cause) -> str:
     if cause == "out_of_range" and spec.int_range is not None:
         low, high = spec.int_range
         return f"{_capitalized(spec.label)} debe ser un número entre {low} y {high}."
+    # The next four are used by `date` and `time`, whose labels are feminine ("la fecha", "la
+    # hora"); the first two are the phrases of TASK.md line 198.
+    if cause == "nonexistent":
+        return f"{_capitalized(spec.label)} indicada no existe."
+    if cause == "bad_format":
+        return f"{_capitalized(spec.label)} está fuera del formato válido."
+    if cause == "past":
+        return f"{_capitalized(spec.label)} indicada ya pasó."
+    if cause == "mismatch":
+        return f"Las partes de {spec.label} que indicaste no dan el mismo día."
     return f"No pude leer {spec.label}."
 
 

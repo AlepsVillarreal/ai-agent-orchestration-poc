@@ -29,7 +29,7 @@ from pydantic import ValidationError
 from core.interpretation import Act, Certainty, TurnInterpretation
 from core.turn import TurnInput, filter_by_registry, handle_turn
 from phase0.scenarios import SCENARIOS
-from tests.interpretations import FIXED
+from tests.interpretations import FIXED, NOW
 
 JUDGED = ("C1", "N1", "S3", "A1", "E1")
 CORE_IDS = ("C1", "N1", "A1", "E1")  # a failure of any of these asks for round 2 or a revert
@@ -60,7 +60,7 @@ def _expected_missing(key: str) -> list[str]:
     """`missing` of the record the core creates for the fixed interpretation of `key`."""
     fixed = FIXED[key]
     interpretation = TurnInterpretation.model_validate(fixed.interpretation)
-    outcome = handle_turn(None, interpretation, TurnInput(fixed.message))
+    outcome = handle_turn(None, interpretation, TurnInput(fixed.message, NOW))
     return outcome.state_delta["pending"]["missing"]
 
 
@@ -73,8 +73,12 @@ def _pairs(operations: list[dict]) -> set[tuple[str, str]]:
 
 
 def _first_message(key: str, record: dict, interpretation: TurnInterpretation) -> Judgement:
-    """`C1`, `N1`, `A1`, `E1`: nothing pending, so the real core decides the row."""
-    outcome = handle_turn(None, interpretation, TurnInput(record["message"]))
+    """`C1`, `N1`, `A1`, `E1`: nothing pending, so the real core decides the row.
+
+    A saved output is read against the fixed `NOW`, so a judgement never depends on the day the
+    judge runs (a date the model copied is resolved against the same moment every time).
+    """
+    outcome = handle_turn(None, interpretation, TurnInput(record["message"], NOW))
     row = outcome.route
     operations = filter_by_registry(interpretation)
     tools = _tools(operations)

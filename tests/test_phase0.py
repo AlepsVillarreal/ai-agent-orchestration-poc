@@ -18,7 +18,7 @@ from core.turn import TurnInput, handle_turn
 from phase0.run import format_report, run_scenarios, shape_failure, strip_code_fence
 from phase0.scenarios import CLARIFICATION_QUESTION, SCENARIOS
 from tests.fake_llm import ScriptedLlm, contents_text, quota_error, system_text
-from tests.interpretations import FIXED
+from tests.interpretations import FIXED, NOW
 
 FIRST_MESSAGES = {"A1", "C1", "D1", "E1", "X1", "Q1", "W1", "N1", "G1", "T1"}
 SECOND_MESSAGES = {"B2", "F2", "L1", "L2", "L3", "L4", "G2", "K1", "K2", "K3", "S1", "S2", "S3"}
@@ -29,7 +29,7 @@ def _core_record(key: str) -> dict:
     return handle_turn(
         None,
         TurnInterpretation.model_validate(FIXED[key].interpretation),
-        TurnInput(FIXED[key].message),
+        TurnInput(FIXED[key].message, NOW),
     ).state_delta["pending"]
 
 

@@ -32,7 +32,7 @@ from tests.fake_llm import (
     run_turn,
     system_text,
 )
-from tests.interpretations import FIXED
+from tests.interpretations import FIXED, NOW
 
 USER = "u1"
 
@@ -71,7 +71,7 @@ def fixed(key: str) -> TurnInterpretation:
 
 
 def handle_fixed(pending: dict | None, key: str):
-    return handle_turn(pending, fixed(key), TurnInput(FIXED[key].message))
+    return handle_turn(pending, fixed(key), TurnInput(FIXED[key].message, NOW))
 
 
 def a1_record() -> dict:
@@ -517,45 +517,8 @@ async def test_invalid_word_through_the_node(monkeypatch, caplog):
     assert "urgente" not in before_changes
 
 
-# 17 (finding 3 of backlog-06): a complete meeting never reaches confirmation before task 09b,
-# and a "yes" afterwards changes nothing.
-async def test_complete_meeting_does_not_reach_confirmation(monkeypatch):
-    _no_tool_runs(monkeypatch)
-    message = "Agenda la revisión del servidor el 20 de noviembre a las 10:30, 30 minutos, con Juan"
-    meeting = {
-        "act": "request_action",
-        "operations": [
-            {
-                "tool": "schedule_meeting",
-                "certainty": "explicit",
-                "args": {
-                    "title": "revisión del servidor",
-                    "date": {"day": 20, "month": 11},
-                    "time": {"hour": 10, "minute": 30},
-                    "duration_minutes": 30,
-                    "attendees": ["Juan"],
-                },
-            }
-        ],
-    }
-    fake = ScriptedLlm(script=[json.dumps(meeting), json.dumps(FIXED["G2"].interpretation)])
-    runner, sessions = make_runner(fake)
-
-    first = await run_turn(runner, USER, "s-meet", message)
-    assert event_text(reply_events(first)[0]).endswith(replies.DATE_TIME_NOT_CHECKED_YET)
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-meet")
-    record = session.state["pending"]
-    assert record["status"] == "collecting"
-    assert record["missing"] == [] and record["invalid"] == []
-    assert record["last_question"] is None
-
-    second = await run_turn(runner, USER, "s-meet", FIXED["G2"].message)
-    [answer] = reply_events(second)
-    assert not answer.actions.state_delta
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-meet")
-    assert session.state["pending"] == record
-    assert session.state["pending"]["status"] == "collecting"  # never awaiting_confirmation
-    assert fake.calls == 2
+# 17 became test 15 of brief 09b (`test_meeting_through_the_node`): a complete meeting now
+# reaches confirmation, and a "yes" runs it.
 
 
 # Brief 10a ------------------------------------------------------------------------------------
@@ -640,3 +603,84 @@ async def test_history_accumulates_and_is_never_read(monkeypatch):
     ):
         assert text not in seen, text
     assert fake.calls == 5
+
+
+# Brief 09b ------------------------------------------------------------------------------------
+
+
+# 14 (case D, TASK.md lines 361-371): through the `Runner`, with the node's own clock. Day 40 and
+# 25:90 are invalid on any day, so the reply is the core's with the fixed `NOW`.
+async def test_case_d_through_the_node(monkeypatch, caplog):
+    _no_tool_runs(monkeypatch)
+    caplog.set_level(logging.INFO, logger="assistant")
+    fake = ScriptedLlm(script=[json.dumps(FIXED["D1"].interpretation)])
+    runner, sessions = make_runner(fake)
+
+    events = await run_turn(runner, USER, "s-d", FIXED["D1"].message)
+
+    assert event_text(reply_events(events)[0]) == handle_fixed(None, "D1").reply
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-d")
+    assert session.state["pending"]["invalid"] == [
+        {"tool": "schedule_meeting", "field": "date", "cause": "nonexistent"},
+        {"tool": "schedule_meeting", "field": "time", "cause": "bad_format"},
+    ]
+
+    [line] = _turn_records(caplog)
+    before_changes = line.split(" changes=")[0]
+    assert "invalid=date:nonexistent,time:bad_format" in before_changes
+    # `op=` is a random uuid, whose hex digits may contain "40", so it is left out of the check.
+    without_op = " ".join(part for part in before_changes.split() if not part.startswith("op="))
+    for number in ("40", "25", "90"):
+        assert number not in without_op, number
+
+
+# 15 (replaces test_complete_meeting_does_not_reach_confirmation): a year far ahead, so the
+# node's real clock never makes the date past.
+async def test_meeting_through_the_node(monkeypatch):
+    calls = record_tools(monkeypatch)
+    results = record_results(monkeypatch)
+    message = (
+        "Agenda la revisión del servidor el 20 de noviembre de 2099 a las 10:30, 30 minutos, "
+        "con Juan"
+    )
+    meeting = {
+        "act": "request_action",
+        "operations": [
+            {
+                "tool": "schedule_meeting",
+                "certainty": "explicit",
+                "args": {
+                    "title": "revisión del servidor",
+                    "date": {"day": 20, "month": 11, "year": 2099},
+                    "time": {"hour": 10, "minute": 30},
+                    "duration_minutes": 30,
+                    "attendees": ["Juan"],
+                },
+            }
+        ],
+    }
+    fake = ScriptedLlm(script=[json.dumps(meeting), json.dumps(FIXED["G2"].interpretation)])
+    runner, sessions = make_runner(fake)
+
+    first = await run_turn(runner, USER, "s-meet", message)
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-meet")
+    record = session.state["pending"]
+    assert record["status"] == "awaiting_confirmation"
+    assert event_text(reply_events(first)[0]).endswith(record["last_question"])
+    assert all(not args for args in calls.values())
+
+    second = await run_turn(runner, USER, "s-meet", FIXED["G2"].message)
+
+    [args] = calls["schedule_meeting"]
+    assert (args["date"], args["time"]) == ("2099-11-20", "10:30")
+    assert calls["create_ticket"] == [] and calls["send_notification"] == []
+    [result] = results["schedule_meeting"]
+    assert (
+        event_text(reply_events(second)[0]) == f"Listo: programé la reunión {result['meeting_id']}."
+    )
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-meet")
+    assert session.state["pending"] is None
+    [entry] = session.state["history"]
+    assert entry["operation_id"] == record["operation_id"]
+    assert entry["steps"][0]["values"]["date"] == "2099-11-20"
+    assert fake.calls == 2
