@@ -12,9 +12,11 @@ so the instruction carries the pending summary of D14. One call per scenario. Th
 goes to a JSONL file in `phase0/runs/`; what the code would do with it is judged by hand in
 task 06. The only number that decides anything is the count of shape failures (F0.1).
 
-Retries (task 06, round 2, the author's decision after a 503): only this harness gives the
-model `HttpRetryOptions`, so the google-genai client retries a 429 or a 503 with exponential
-backoff and jitter, up to 3 attempts. The turn node and `assistant/` keep D1.1: no retries.
+Retries (task 06, round 2, the author's decision after a 503): this harness gives its model
+its own `HttpRetryOptions`, so the google-genai client retries a 429 or a 503 with exponential
+backoff and jitter, up to 3 attempts. The turn node keeps D1.1 (no `retry_config`); the agent's
+interpreter has its own, shorter setting (D1.2: one retry, 503 only), which this harness does
+not use because it always passes its own model.
 """
 
 import argparse

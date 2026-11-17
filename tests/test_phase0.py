@@ -314,7 +314,7 @@ def _previous_jsonl(path, valid: list[str], failed: list[str]) -> list[str]:
 
 
 # (e)
-def test_retries_only_in_the_harness(monkeypatch, tmp_path):
+def test_harness_keeps_its_own_retries(monkeypatch, tmp_path):
     model = phase0.run.harness_model()
     assert isinstance(model, Gemini)
     assert model.model == phase0.run.MODEL
@@ -331,9 +331,12 @@ def test_retries_only_in_the_harness(monkeypatch, tmp_path):
     assert isinstance(given, Gemini)
     assert given.retry_options == phase0.run.RETRY_OPTIONS
 
-    # The agent itself keeps D1.1: a plain model name and no retry setting on the turn node.
-    assert assistant.interpreter.interpreter.model == phase0.run.MODEL
-    assert isinstance(assistant.interpreter.interpreter.model, str)
+    # The agent's interpreter has its own, different setting (D1.2), and the turn node still
+    # has no retry_config (D1.1).
+    agent_model = assistant.interpreter.interpreter.model
+    assert isinstance(agent_model, Gemini)
+    assert agent_model.retry_options is assistant.interpreter.INTERPRETER_RETRY_OPTIONS
+    assert phase0.run.RETRY_OPTIONS != assistant.interpreter.INTERPRETER_RETRY_OPTIONS
     turn_node = assistant.agent.root_agent.edges[0][1]
     assert turn_node.retry_config is None
 

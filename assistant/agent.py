@@ -81,8 +81,9 @@ def build_root_agent(interpreter: LlmAgent) -> Workflow:
     """The root workflow: one edge from START to the turn node (D1.1). Tests pass an
     interpreter built on a fake model."""
 
-    # rerun_on_resume=True as D1.1 fixes it, and no retry setting: a retry would run the body (and
-    # the model) again and spend free-tier quota.
+    # rerun_on_resume=True as D1.1 fixes it, and no retry_config: a retry would run the body (and
+    # the model) again and spend free-tier quota. The HTTP retry of a 503 lives in the
+    # interpreter's model (D1.2), below this node.
     @node(rerun_on_resume=True)
     async def turn(ctx: Context, node_input: Any) -> Event:
         # Only `ctx` and `node_input`: any other parameter would be bound to a state key.

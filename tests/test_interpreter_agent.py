@@ -3,12 +3,18 @@ from collections.abc import AsyncGenerator
 from types import SimpleNamespace
 
 from google.adk import Runner
-from google.adk.models import BaseLlm, LlmRequest, LlmResponse
+from google.adk.models import BaseLlm, Gemini, LlmRequest, LlmResponse
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from pydantic import Field
 
-from assistant.interpreter import MODEL, build_interpreter, interpreter, interpreter_instruction
+from assistant.interpreter import (
+    INTERPRETER_RETRY_OPTIONS,
+    MODEL,
+    build_interpreter,
+    interpreter,
+    interpreter_instruction,
+)
 from core.instruction import NOTHING_PENDING, build_instruction, pending_summary
 from core.interpretation import TurnInterpretation
 from tests.interpretations import FIXED
@@ -49,7 +55,10 @@ def _texts(request: LlmRequest) -> list[str]:
 # 18
 def test_interpreter_configuration():
     assert interpreter.name == "interpreter"
-    assert interpreter.model == MODEL == "gemini-3.5-flash-lite"
+    # D1.2: the live agent carries the 503 retry in its model, not in generate_content_config.
+    assert isinstance(interpreter.model, Gemini)
+    assert interpreter.model.model == MODEL == "gemini-3.5-flash-lite"
+    assert interpreter.model.retry_options is INTERPRETER_RETRY_OPTIONS
     assert interpreter.output_schema is TurnInterpretation
     assert interpreter.include_contents == "none"
     assert interpreter.output_key is None
@@ -57,6 +66,17 @@ def test_interpreter_configuration():
     assert interpreter.sub_agents == []
     assert interpreter.generate_content_config is None
     assert callable(interpreter.instruction)
+
+
+# D1.2: two attempts, only on a 503 (a 429 is spent quota), the SDK's exp_base and jitter.
+def test_interpreter_retry_options():
+    options = INTERPRETER_RETRY_OPTIONS
+    assert options.attempts == 2
+    assert options.http_status_codes == [503]
+    assert options.initial_delay == 1.0
+    assert options.max_delay == 5.0
+    assert options.exp_base is None
+    assert options.jitter is None
 
 
 # 19
