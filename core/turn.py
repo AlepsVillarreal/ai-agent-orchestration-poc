@@ -1,10 +1,10 @@
 """The function that decides one turn.
 
-`handle_turn` receives the pending record, the interpreter's output and the turn's own inputs
-(`TurnInput`: today the message text) and returns a template reply plus the state change. It
-calls no model. The ADK turn node is its only caller: it puts `reply` in the event's message
-and `state_delta` in the event's state (D1.1). `_run_confirmed` is the only place in the code
-that runs a tool (decision 1 of brief 10a, option A).
+`handle_turn` receives the pending record, the interpreter's output, the turn's own inputs
+(`TurnInput`: today the message text) and the closed operations (`history`, D6, read by no
+rule), and returns a template reply plus the state change. It calls no model. The ADK turn node
+is its only caller: it puts `reply` in the event's message and `state_delta` in the event's
+state (D1.1). `_run_confirmed` is the only place in the code that runs a tool (D46).
 
 Order of a turn (D3, *Compuerta de entrada*):
 1. Registry filter (`filter_by_registry`): drop operations of unknown tools and keep only the
@@ -17,8 +17,8 @@ Order of a turn (D3, *Compuerta de entrada*):
      the pending tool go through the merge first, and a change, a rejected name or a note never
      runs (what D4 requires of D7); (4) still `collecting` -> repeat the question (D7.1);
      (5) the hash of the shown values must match (D7.2), else show them again with the new
-     hash; (6) `_run_confirmed` calls the tool once with the normalized values and empties
-     `pending`.
+     hash; (6) `_run_confirmed` calls the tool once with the normalized values, empties
+     `pending`, answers with one result line per step and appends the record to `history`.
    - *Misma tool*: `act` is `request_action` or `provide_info` and every operation is of a
      pending tool (none at all counts too) -> each operation is anchored and merged into the
      step of its tool (D4, D18); `certainty` is ignored (D2). The reply shows every change,
@@ -49,12 +49,14 @@ the log. The normalized values are recomputed every time, never stored (D44).
 """
 
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
 from core import replies
 from core.confirmation import confirmation_hash, shown_values
+from core.history import COMPLETED, appended, closed_entry
 from core.interpretation import Act, Certainty, TurnInterpretation
 from core.merge import Change, MergeResult, Rejected, merge_args
 from core.registry import TOOLS, FieldKind, ToolSpec, list_buckets
@@ -83,10 +85,14 @@ class TurnOutcome:
     changes: list[Change] = field(default_factory=list)  # for the log (D4 rule 8)
     rejected: list[Rejected] = field(default_factory=list)  # for the log (D4 rule 3)
     invalid: list[dict] = field(default_factory=list)  # the record's `invalid`, for the log (D5)
+    results: list[tuple[str, str]] = field(default_factory=list)  # (tool, ID) per step that ran
 
 
 def handle_turn(
-    pending: dict | None, interpretation: TurnInterpretation, turn_input: TurnInput
+    pending: dict | None,
+    interpretation: TurnInterpretation,
+    turn_input: TurnInput,
+    history: Sequence[dict] = (),
 ) -> TurnOutcome:
     operations = filter_by_registry(interpretation)
     dropped_some = len(operations) < len(interpretation.operations)
@@ -98,6 +104,7 @@ def handle_turn(
         turn_input.message,
         confirms_tool=interpretation.confirms_tool,
         dropped_some=dropped_some,
+        history=history,
     )
 
     # D10: tell the user part of the request was ignored, unless nothing was left and nothing
@@ -116,6 +123,7 @@ def _decide(
     message: str,
     confirms_tool: str | None,
     dropped_some: bool,
+    history: Sequence[dict],
 ) -> TurnOutcome:
     tool_counts = Counter(operation["tool"] for operation in operations)
     if any(count > 1 for count in tool_counts.values()):
@@ -126,7 +134,7 @@ def _decide(
         # `question`, `other` and the clarification are tasks 12 and 13.
         if pending.get("status") in (COLLECTING, AWAITING_CONFIRMATION):
             if act == Act.CONFIRM:
-                return _confirm(pending, operations, message, confirms_tool, dropped_some)
+                return _confirm(pending, operations, message, confirms_tool, dropped_some, history)
             if act in (Act.REQUEST_ACTION, Act.PROVIDE_INFO) and all(
                 operation["tool"] in pending["tools"] for operation in operations
             ):
@@ -221,6 +229,7 @@ def _confirm(
     message: str,
     confirms_tool: str | None,
     dropped_some: bool,
+    history: Sequence[dict],
 ) -> TurnOutcome:
     """A "yes" with something pending (D7). It runs the tool only at the end of this order.
 
@@ -259,23 +268,33 @@ def _confirm(
         record = {key: value for key, value in pending.items() if key != "confirmation_hash"}
         record.update(assessed)
         return _pending_outcome(record, [], route="confirm_hash_changed")
-    return _run_confirmed(shown_values(pending["steps"]))
+    return _run_confirmed(pending, shown_values(pending["steps"]), history)
 
 
-def _run_confirmed(shown: list[dict[str, Any]]) -> TurnOutcome:
-    """The only place in the code that runs a tool (decision 1 of brief 10a, option A).
+def _run_confirmed(record: dict, shown: list[dict], history: Sequence[dict]) -> TurnOutcome:
+    """The only place in the code that runs a tool (D46).
 
     Each step's tool receives the normalized values the user confirmed, the same ones the hash
     covers (" Carlos " -> "Carlos", "correo" -> "email"); the mock checks them against its
     contract (D12). `pending` is emptied, so a repeated "yes" finds nothing pending (TASK.md
-    line 284). The reply is each result's own `message` until task 10b writes it in Spanish;
-    `history`, `success=false` and the execution record of D9 are tasks 10b and 11.
+    line 284), and the record goes to `history` as completed, with the values each tool received
+    and its result (D6). The reply is one result line per step, with the ID the tool returned
+    (TASK.md line 246). `success` is not read yet: "Listo" and `completed` assume it; a failed
+    or raising tool, stopping a plan and the execution record are task 11 (D8.3, D9).
     """
-    results = [TOOLS[step["tool"]].execute(step["normalized"]) for step in shown]
+    done, lines, results = [], [], []
+    for step in shown:
+        tool = TOOLS[step["tool"]]
+        result = tool.execute(step["normalized"])
+        done.append({"tool": tool.name, "values": step["normalized"], "result": result})
+        lines.append(replies.result_line(tool, result))
+        results.append((tool.name, str(result[tool.result_id_field])))
+    entry = closed_entry(record, COMPLETED, done)
     return TurnOutcome(
-        "\n".join(result["message"] for result in results),
-        state_delta={"pending": None},
+        "\n".join(lines),
+        state_delta={"pending": None, "history": appended(history, entry)},
         route="confirmed",
+        results=results,
     )
 
 

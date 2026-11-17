@@ -55,6 +55,12 @@ FIXED: dict[str, FixedTurn] = {
             "operations": [_op("create_ticket", title="Falla de autenticación")],
         },
     ),
+    # Case B, fourth message (own wording): the "yes" to the confirmation, which TASK.md lines
+    # 311-335 do not show (D7.1, F4). `confirms_tool` names the pending tool, as `G2` came back
+    # from the real model (D32), so D7.4 lets it through.
+    "B4": FixedTurn(
+        "Sí, créalo", {"act": "confirm", "operations": [], "confirms_tool": "create_ticket"}
+    ),
     # Case C, TASK.md line 342: one explicit reading and one plausible one.
     "C1": FixedTurn(
         "Avísale a Carlos que mañana revisamos el servidor",

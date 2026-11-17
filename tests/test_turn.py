@@ -776,9 +776,11 @@ def test_yes_runs_the_pending_operation_once(monkeypatch, recipient):
 
     assert calls["send_notification"] == [G1_NORMALIZED]
     assert calls["create_ticket"] == [] and calls["schedule_meeting"] == []
-    assert outcome.state_delta == {"pending": None}
+    # Task 10b: the closed record also goes to `history` (D6), and the reply is the result line.
+    assert outcome.state_delta.keys() == {"pending", "history"}
+    assert outcome.state_delta["pending"] is None
     assert outcome.route == "confirmed"
-    assert outcome.reply.startswith("Notificación NTF-")  # the mock's message until task 10b
+    assert outcome.reply.startswith("Listo: envié la notificación ")
 
 
 # 4 (D7.1, note (ss))
@@ -856,7 +858,7 @@ def test_confirms_tool_veto(monkeypatch, confirms_tool, runs):
 
     if runs:
         assert calls["send_notification"] == [G1_NORMALIZED]
-        assert outcome.state_delta == {"pending": None}
+        assert outcome.state_delta["pending"] is None  # and `history` gets the record (10b)
     else:
         assert nothing_ran(calls)
         assert outcome.state_delta == {}
@@ -1016,3 +1018,137 @@ def test_yes_repeating_a_stored_value_counts(monkeypatch, args, message):
 
     assert outcome.route == "confirmed"
     assert calls["send_notification"] == [G1_NORMALIZED]
+
+
+# Brief 10b ------------------------------------------------------------------------------------
+
+
+def fixed_result(tool_name: str, result_id: str = "abc-123") -> dict[str, Any]:
+    """A tool result as the mocks return it, with an ID and a `message` that must not be shown."""
+    return {"success": True, TOOLS[tool_name].result_id_field: result_id, "message": "MOCK-MESSAGE"}
+
+
+def tools_return_fixed_results(monkeypatch) -> dict[str, list[dict]]:
+    """Every tool returns `fixed_result`; the arguments it got are recorded."""
+    calls: dict[str, list[dict]] = {name: [] for name in TOOLS}
+    for name, spec in list(TOOLS.items()):
+
+        def double(args, name=name):
+            calls[name].append(args)
+            return fixed_result(name)
+
+        monkeypatch.setitem(TOOLS, name, dataclasses.replace(spec, execute=double))
+    return calls
+
+
+def old_entries(count: int) -> list[dict]:
+    return [{"operation_id": f"old-{i}", "status": "completed", "steps": []} for i in range(count)]
+
+
+# 1 (decision 1, notes 4 and 5): no turn needed, so `schedule_meeting` is covered before 09b.
+@pytest.mark.parametrize("name", list(TOOLS))
+def test_result_line_per_tool(name):
+    tool = TOOLS[name]
+    result = {"success": True, tool.result_id_field: "X-1", "message": "otro texto"}
+
+    line = replies.result_line(tool, result)
+
+    assert line == f"Listo: {tool.done_phrase} X-1."
+    assert "otro texto" not in line
+
+
+# Review 10b-1, note 2: the phrase and the ID field come from the registry, never from tool
+# names (TASK.md line 562): a tool outside the catalog with its own ID field.
+def test_result_line_reads_the_registry_id_field():
+    room = dataclasses.replace(
+        TOOLS["create_ticket"],
+        name="book_room",
+        done_phrase="reservé la sala",
+        result_id_field="room_id",
+    )
+    result = {"success": True, "room_id": "R-7", "ticket_id": "WRONG", "message": "otro texto"}
+
+    assert replies.result_line(room, result) == "Listo: reservé la sala R-7."
+
+
+# 2 (notes 4 and 5): the reply reads the ID the tool returned and never shows its `message` nor
+# a canonical value.
+@pytest.mark.parametrize("key", ["G1", "H1"])
+def test_yes_reply_reads_the_result(monkeypatch, key):
+    tools_return_fixed_results(monkeypatch)
+    pending = handle_fixed(None, key).state_delta["pending"]
+    tool = TOOLS[pending["tools"][0]]
+
+    outcome = handle_fixed(pending, "G2")
+
+    assert outcome.route == "confirmed"
+    assert outcome.reply == f"Listo: {tool.done_phrase} abc-123."
+    assert outcome.results == [(tool.name, "abc-123")]
+    for text in ("MOCK-MESSAGE", "email", "high"):
+        assert text not in outcome.reply
+
+
+# 3 (D6, decision 2): the entry keeps the normalized values the tool received, not `args`.
+@pytest.mark.parametrize("recipient", ["Carlos", " Carlos "])
+def test_confirmed_operation_goes_to_history(monkeypatch, recipient):
+    calls = tools_return_fixed_results(monkeypatch)
+    g1 = json.loads(json.dumps(FIXED["G1"].interpretation))
+    g1["operations"][0]["args"]["recipient"] = recipient
+    pending = handle_turn(
+        None, TurnInterpretation.model_validate(g1), TurnInput(FIXED["G1"].message)
+    ).state_delta["pending"]
+
+    outcome = handle_turn(pending, fixed("G2"), TurnInput(FIXED["G2"].message), history=())
+
+    entry = {
+        "operation_id": pending["operation_id"],
+        "status": "completed",
+        "steps": [
+            {
+                "tool": "send_notification",
+                "values": G1_NORMALIZED,
+                "result": fixed_result("send_notification"),
+            }
+        ],
+    }
+    assert outcome.state_delta == {"pending": None, "history": [entry]}
+    assert calls["send_notification"] == [G1_NORMALIZED]
+    json.dumps(outcome.state_delta)  # it goes to the session state as it is
+
+
+# 4 (D6): the last ten, newest last, and the list received is not changed.
+@pytest.mark.parametrize(("before", "after"), [(10, 10), (3, 4)])
+def test_history_keeps_the_last_ten(monkeypatch, before, after):
+    tools_return_fixed_results(monkeypatch)
+    history = old_entries(before)
+    received = json.loads(json.dumps(history))
+    pending = g1_pending()
+
+    outcome = handle_turn(pending, fixed("G2"), TurnInput(FIXED["G2"].message), history=history)
+
+    new = outcome.state_delta["history"]
+    assert len(new) == after
+    assert new[-1]["operation_id"] == pending["operation_id"]
+    assert new[:-1] == received[before - after + 1 :]  # with 10, "old-0" is out
+    assert history == received
+
+
+# 5 (D6): only the route that runs a tool writes `history`.
+def test_only_a_confirmed_yes_writes_history():
+    history = old_entries(2)
+    outcomes = []
+    for pending in (None, a1_pending()):
+        outcomes += [
+            handle_turn(pending, fixed(key), TurnInput(FIXED[key].message), history=history)
+            for key in FIXED
+        ]
+    pending = None
+    for key in ("B1", "B2", "B3"):
+        outcome = handle_turn(pending, fixed(key), TurnInput(FIXED[key].message), history=history)
+        pending = outcome.state_delta.get("pending", pending)
+        outcomes.append(outcome)
+
+    for outcome in outcomes:
+        assert "history" not in outcome.state_delta, outcome.route
+        assert outcome.route != "confirmed"
+        assert outcome.results == []

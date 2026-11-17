@@ -48,6 +48,7 @@ def _fake_tool(name: str, *fields: tuple[str, FieldKind]) -> ToolSpec:
         description=f"Fake tool {name}.",
         action_phrase="hacer algo",
         short_name="algo",
+        done_phrase="hice algo",
         fields=tuple(
             FieldSpec(name=field, kind=kind, description=f"The {field}.", label=field)
             for field, kind in fields

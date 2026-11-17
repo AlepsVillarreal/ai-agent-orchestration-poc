@@ -48,7 +48,7 @@ class FieldSpec:
     label: str  # Spanish, used when asking for it: "la prioridad", "a quién se asigna"
     allowed: tuple[str, ...] = ()  # canonical values of a `word` field
     synonyms: dict[str, tuple[str, ...]] = field(default_factory=dict)  # canonical -> words
-    # Spanish name of each value of `allowed`, for replies: "alta" for "high" (tasks 09a-10b).
+    # Spanish name of each value of `allowed`, for replies: "alta" for "high".
     value_labels: dict[str, str] = field(default_factory=dict)
     int_range: tuple[int, int] | None = None  # inclusive bounds of an `int` field (D5.3)
 
@@ -71,6 +71,7 @@ class ToolSpec:
     description: str  # English, read by the interpreter
     action_phrase: str  # Spanish, D3: "crear un ticket"
     short_name: str  # Spanish, D3: "ticket"
+    done_phrase: str  # Spanish, the reply after it runs: "creé el ticket" (+ the result ID)
     fields: tuple[FieldSpec, ...]  # all required, in the order of TASK.md §2.1
     contract: type[BaseModel]
     result_id_field: str  # "ticket_id", ...
@@ -88,6 +89,7 @@ TOOLS: dict[str, ToolSpec] = {
         description="Create a support ticket to report or track a problem.",
         action_phrase="crear un ticket",
         short_name="ticket",
+        done_phrase="creé el ticket",
         fields=(
             FieldSpec(
                 name="title",
@@ -132,6 +134,7 @@ TOOLS: dict[str, ToolSpec] = {
         description="Schedule a meeting with one or more people.",
         action_phrase="programar una reunión",
         short_name="reunión",
+        done_phrase="programé la reunión",
         fields=(
             FieldSpec(
                 name="title",
@@ -177,6 +180,7 @@ TOOLS: dict[str, ToolSpec] = {
         description="Send a notification message to a person through a channel.",
         action_phrase="enviar una notificación",
         short_name="notificación",
+        done_phrase="envié la notificación",
         fields=(
             FieldSpec(
                 name="recipient",

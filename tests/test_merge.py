@@ -281,6 +281,7 @@ def test_rules_are_declared_per_kind():
         description="Ask people to review a document.",
         action_phrase="pedir una revisión",
         short_name="revisión",
+        done_phrase="pedí la revisión",
         fields=(
             FieldSpec("owner", FieldKind.PERSON, "Owner.", "el responsable"),
             FieldSpec("reviewers", FieldKind.PERSON_LIST, "Reviewers.", "los revisores"),

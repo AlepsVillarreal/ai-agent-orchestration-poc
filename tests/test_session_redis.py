@@ -94,6 +94,7 @@ async def test_state_survives_reload_from_redis(redis_url):
 
 
 # 17 (brief 10a): after the "yes", a new service instance reloads `pending` as None.
+# Brief 10b: and `history` with the entry the turn wrote (D6; RF-07, TASK.md lines 220-227).
 async def test_confirmed_operation_is_gone_after_reload(redis_url, monkeypatch):
     calls = []
 
@@ -116,11 +117,15 @@ async def test_confirmed_operation_is_gone_after_reload(redis_url, monkeypatch):
         session = await second.get_session(app_name=APP, user_id=USER, session_id=session_id)
         assert session.state["pending"]["status"] == "awaiting_confirmation"
 
-        await run_turn(runner, USER, session_id, FIXED["G2"].message)
+        events = await run_turn(runner, USER, session_id, FIXED["G2"].message)
 
         session = await second.get_session(app_name=APP, user_id=USER, session_id=session_id)
         assert "pending" in session.state and session.state["pending"] is None
         assert len(calls) == 1
+        [answer] = reply_events(events)
+        written = answer.actions.state_delta["history"]
+        assert len(written) == 1 and written[0]["steps"][0]["values"] == calls[0]
+        assert session.state["history"] == written
     finally:
         await second.delete_session(app_name=APP, user_id=USER, session_id=session_id)
         await first_client.aclose()

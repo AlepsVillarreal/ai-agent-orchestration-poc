@@ -92,6 +92,7 @@ def test_every_tool_and_field_has_descriptions_and_labels():
         assert tool.description.strip()
         assert tool.action_phrase.strip()
         assert tool.short_name.strip()
+        assert tool.done_phrase.strip()
         assert tool.result_id_field.strip()
         for spec in tool.fields:
             assert spec.description.strip(), (tool.name, spec.name)

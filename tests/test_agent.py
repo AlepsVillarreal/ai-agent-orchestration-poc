@@ -254,13 +254,29 @@ def record_tools(monkeypatch) -> dict[str, list[dict]]:
     return calls
 
 
+def record_results(monkeypatch) -> dict[str, list[dict]]:
+    """Wrap every tool's current `execute` to record what it returned (the mock's own ID)."""
+    results: dict[str, list[dict]] = {name: [] for name in TOOLS}
+    for name, spec in list(TOOLS.items()):
+
+        def recorder(args, name=name, inner=spec.execute):
+            results[name].append(inner(args))
+            return results[name][-1]
+
+        monkeypatch.setitem(TOOLS, name, dataclasses.replace(spec, execute=recorder))
+    return results
+
+
 # 13 (TASK.md lines 311-335): case B in one session, until every field is in, then a "yes".
 # Task 10a: the records are compared without `operation_id` (a new uuid on every call), the
 # complete ticket awaits confirmation, and the fourth turn runs `create_ticket` once.
+# Task 10b: the fourth turn is case B's own "yes" (`B4`, not `G2`); its reply is the result
+# line with the mock's ID, and the closed record goes to `history` (D6).
 async def test_case_b_through_the_node(monkeypatch):
     calls = record_tools(monkeypatch)
+    results = record_results(monkeypatch)
     keys = ("B1", "B2", "B3")
-    script = [json.dumps(FIXED[key].interpretation) for key in (*keys, "G2")]
+    script = [json.dumps(FIXED[key].interpretation) for key in (*keys, "B4")]
     fake = ScriptedLlm(script=script)
     runner, sessions = make_runner(fake)
 
@@ -288,7 +304,7 @@ async def test_case_b_through_the_node(monkeypatch):
     assert replies_seen[-1].endswith(record["last_question"])
     assert all(not args for args in calls.values())  # nothing runs before the "yes"
 
-    await run_turn(runner, USER, "s-b", FIXED["G2"].message)
+    events = await run_turn(runner, USER, "s-b", FIXED["B4"].message)
 
     assert calls["create_ticket"] == [
         {
@@ -299,8 +315,16 @@ async def test_case_b_through_the_node(monkeypatch):
         }
     ]
     assert calls["schedule_meeting"] == [] and calls["send_notification"] == []
+    [result] = results["create_ticket"]
+    reply = event_text(reply_events(events)[0])
+    assert reply.startswith("Listo: creé el ticket ")
+    assert reply == f"Listo: creé el ticket {result['ticket_id']}."
     session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-b")
     assert session.state["pending"] is None
+    [entry] = session.state["history"]
+    assert entry["operation_id"] == record["operation_id"]
+    assert entry["status"] == "completed"
+    assert entry["steps"][0]["result"] == result
     assert fake.calls == 4
 
 
@@ -541,6 +565,7 @@ async def test_complete_meeting_does_not_reach_confirmation(monkeypatch):
 # normalized values, and empties `pending`; the log ties both turns to the same operation.
 async def test_case_g_through_the_node(monkeypatch, caplog):
     calls = record_tools(monkeypatch)
+    results = record_results(monkeypatch)
     caplog.set_level(logging.INFO, logger="assistant")
     fake = ScriptedLlm(
         script=[json.dumps(FIXED["G1"].interpretation), json.dumps(FIXED["G2"].interpretation)]
@@ -568,7 +593,50 @@ async def test_case_g_through_the_node(monkeypatch, caplog):
     assert calls["create_ticket"] == [] and calls["schedule_meeting"] == []
     assert fake.calls == 2
     [answer] = reply_events(second)
-    assert event_text(answer).startswith("Notificación NTF-")
+    # Task 10b: the result line with the mock's ID, not the mock's `message`.
+    [result] = results["send_notification"]
+    result_id = result["notification_id"]
+    assert event_text(answer) == f"Listo: envié la notificación {result_id}."
+    [entry] = session.state["history"]
+    assert entry["operation_id"] == operation and entry["status"] == "completed"
     [g2_line] = _turn_records(caplog)
-    assert "route=confirmed" in g2_line
+    assert f"route=confirmed results=send_notification:{result_id} " in g2_line
     assert f"op={operation}" in g2_line
+
+
+# Brief 10b ------------------------------------------------------------------------------------
+
+
+# 9 (D2, D6, D14): two executions in one session; the node passes the stored history (else the
+# second would replace the first), and nothing of it reaches the model.
+async def test_history_accumulates_and_is_never_read(monkeypatch):
+    results = record_results(monkeypatch)
+    keys = ("G1", "G2", "H1", "B4", "Q1")
+    fake = ScriptedLlm(script=[json.dumps(FIXED[key].interpretation) for key in keys])
+    runner, sessions = make_runner(fake)
+
+    for key in keys:
+        await run_turn(runner, USER, "s-hist", FIXED[key].message)
+
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-hist")
+    history = session.state["history"]
+    assert [entry["steps"][0]["tool"] for entry in history] == [
+        "send_notification",
+        "create_ticket",
+    ]
+    assert history[0]["operation_id"] != history[1]["operation_id"]
+    assert session.state["pending"] is None
+
+    [notification], [ticket] = results["send_notification"], results["create_ticket"]
+    request = fake.requests[-1]  # Q1, after both executions
+    seen = system_text(request) + "\n".join(contents_text(request))
+    assert NOTHING_PENDING in system_text(request)
+    for text in (
+        "Carlos",
+        "resuelto",
+        "Servidor caído",
+        notification["notification_id"],
+        ticket["ticket_id"],
+    ):
+        assert text not in seen, text
+    assert fake.calls == 5

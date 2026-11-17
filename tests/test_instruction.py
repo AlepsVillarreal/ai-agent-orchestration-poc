@@ -33,6 +33,7 @@ def test_instruction_is_generated_from_the_catalog():
         description="Book a meeting room.",
         action_phrase="reservar una sala",
         short_name="sala",
+        done_phrase="reservé la sala",
         fields=(
             FieldSpec(name="room", kind=FieldKind.TEXT, description="Room name.", label="sala"),
         ),

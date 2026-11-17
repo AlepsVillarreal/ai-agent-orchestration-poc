@@ -114,6 +114,17 @@ def confirmation_question(tools: list[ToolSpec]) -> str:
     return f"¿Confirmas que quieres {actions}? Responde sí o no."
 
 
+def result_line(tool: ToolSpec, result: dict[str, Any]) -> str:
+    """The reply for one step that ran (TASK.md lines 9 and 246): what was done and its ID.
+
+    The phrase and the ID field come from the registry (TASK.md line 562); the ID is copied as
+    the tool returned it, never assumed to have a format. The tool's own `message` is not shown:
+    it has the canonical values ("high", "email") and repeats what was just confirmed; it stays
+    in `history` with the rest of the result (D6).
+    """
+    return f"Listo: {tool.done_phrase} {result[tool.result_id_field]}."
+
+
 def _normalized_value(spec: FieldSpec, value: Any) -> str:
     if spec.kind == FieldKind.WORD:
         return spec.value_labels.get(value, value)

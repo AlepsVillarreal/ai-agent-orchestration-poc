@@ -3,8 +3,8 @@
 The turn node is the only place where ADK meets the pure core (D1.1, *Frontera*). Each turn it:
 1. reads the pending record from the session state (read only);
 2. calls the interpreter as a child node with `ctx.run_node` (D1: the LLM only interprets);
-3. hands the interpretation, the pending record and the message text (`TurnInput`) to
-   `core.turn.handle_turn`;
+3. hands the interpretation, the pending record, the message text (`TurnInput`) and the closed
+   operations (`history`, D6) to `core.turn.handle_turn`;
 4. returns exactly one `Event` with the template reply and the state change.
 
 The state is written only through that final event (`Event(state=...)` becomes
@@ -84,11 +84,14 @@ def log_turn(
     rejected: Sequence[Rejected] = (),
     invalid: Sequence[dict] = (),
     operation_id: str | None = None,
+    results: Sequence[tuple[str, str]] = (),
 ) -> None:
     """One `key=value` line per turn. `route` comes from the core, never from the reply text.
 
     `op` is the `operation_id` of the turn's record (the one the turn created or changed, else
     the one that was pending), when there is one; a uuid, never a user value.
+    A turn that ran a tool adds `results=` (`tool:ID` per step) after `route=`: the ID comes
+    from the tool, not from the user.
     `ops` lists the operations as the interpreter returned them, before the registry filter, so
     an unknown tool dropped by D10 stays visible. The keys before `changes=` carry no argument
     value and no message text. A turn the interpreter understood adds `invalid=`
@@ -106,6 +109,8 @@ def log_turn(
     if operation_id:
         parts.append(f"op={operation_id}")
     parts += [f"act={act}", f"ops={ops}", f"route={route}"]
+    if results:
+        parts.append("results=" + ",".join(f"{tool}:{result_id}" for tool, result_id in results))
     if error:
         parts.append(f"error={error}")
     if interpretation:
@@ -156,7 +161,8 @@ def build_root_agent(interpreter: LlmAgent) -> Workflow:
         interpretation = TurnInterpretation.model_validate(output)
         # Outside the `try`: an error in the core is a bug and must surface as one.
         turn_input = TurnInput(message=message_text(node_input))
-        outcome = handle_turn(pending, interpretation, turn_input)
+        history = ctx.state.get("history") or []  # read only: the core returns the new list
+        outcome = handle_turn(pending, interpretation, turn_input, history=history)
         log_turn(
             ctx.session.id,
             outcome.route,
@@ -164,6 +170,7 @@ def build_root_agent(interpreter: LlmAgent) -> Workflow:
             changes=outcome.changes,
             rejected=outcome.rejected,
             invalid=outcome.invalid,
+            results=outcome.results,
             # The record the turn wrote, or the pending one when it wrote none or emptied it.
             operation_id=_operation_id(outcome.state_delta.get("pending") or pending),
         )
