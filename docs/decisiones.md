@@ -416,9 +416,9 @@ ejecuta una tool o qué se guarda se sigue consultando al autor.
   `cancel` [resuelto en D7]; D8, hereda que el plan de una aclaración es lineal, en el orden de las candidatas
   y con la dependencia que ya traían [resuelto en D8]. Sin asignar: nombres de tools como enum cerrado o cadena
   libre [resuelto en D10]; avisar al usuario de las operaciones `explicit` que el filtro del registro descarta [resuelto en D10];
-  una `question` durante una aclaración (hoy cuenta como respuesta no clara); dos operaciones
+  una `question` durante una aclaración (hoy cuenta como respuesta no clara) [resuelto en D79]; dos operaciones
   de la misma tool con distinta `certainty` [resuelto en D11]; R3 con tres o más `explicit` (D1 prevé dos
-  pasos) [resuelto en D8]; `asked_turn` e `id` de la aclaración, que ninguna regla lee; y dónde vive un
+  pasos) [resuelto en D8]; `asked_turn` e `id` de la aclaración, que ninguna regla lee [resuelto en D73]; y dónde vive un
   registro "archivado" [resuelto en D6]. Revisión adversarial de la aclaración: hecha el 2026-11-16. La marca
   "provisional" se quita cuando las tres respuestas y las tres sondas pasen la fase 0 [enmendado en F0].
 
@@ -847,7 +847,7 @@ el orquestador; revisable
   `{pending?}` literal con el registro en otra clave (cambia el nombre que fija D6).
 - **Pendiente:** la tarea 03 debe escribir `tools` también en una aclaración, con los nombres
   de las candidatas: D3 (*Aclaración*, *Estado*) solo lista `candidates`, y el resumen no la
-  lee.
+  lee. [resuelto en D73]
 
 **D15 · Intérprete: una clave fuera del esquema se descarta** (2026-11-16) · autodecidida por
 el orquestador; revisable
@@ -1524,7 +1524,7 @@ D10** (2026-11-17) · autodecidida por el orquestador; revisable
   `READY_NOT_AVAILABLE_YET` con un registro completo. Ningún test fija esa parte (revisión de la
   tarea 08, ronda 2, nota 1). Las tareas 10a y 12, que reemplazan esas plantillas, deben
   decidirla y probarla en vez de heredarla. [la parte de la 10a, resuelta en D45 y D47] [la parte
-  de la 12, resuelta en D71]
+  de la 12, resuelta en D71] [la de la aclaración, resuelta en D81]
 - **Redacción:** "Parte de tu solicitud" es inexacta cuando la única operación del turno era la
   descartada; se acepta por ahora.
 - **Descartada:** dejar la pregunta pendiente sola, sin aviso (el descarte silencioso que D10
@@ -1550,6 +1550,7 @@ orquestador; revisable
     aun vacíos; esas dos claves llevan valores del usuario y la línea ya no se parte por espacios.
   - *Solo `collecting`:* *Misma tool* exige un registro en `collecting`; los demás estados siguen
     con la plantilla provisional (10a y 13). [`awaiting_confirmation` resuelto en D47]
+    [`awaiting_clarification` resuelto en D81]
   - *Sin cambios:* un turno *Misma tool* que no cambia nada devuelve un delta vacío; uno con solo
     una nota o un rechazo tampoco cambia el estado y muestra esas líneas antes de la pregunta.
     [precisado en D57: salvo que el paso del tiempo cambie la validez]
@@ -2041,7 +2042,7 @@ el orquestador; revisable
     (revisión de la tarea 10c, ronda 1, nota 4).
   - *Copia de D3:* cuatro actos sueltos (`cancel` en la regla 1, `reject` y `provide_info` en
     la 4, `provide_info` en la 2) no tienen test propio; la 13 pone un caso por acto al
-    reemplazar la copia (ronda 3, nota 1).
+    reemplazar la copia (ronda 3, nota 1). [resuelto en D81]
 
 **D54 · Tarea 08b: la fusión de D11.1 en el turno** (2026-11-17) · autodecidida por el
 orquestador; revisable
@@ -2713,7 +2714,7 @@ autodecidida por el orquestador; revisable
     "no" o "cancela" sí descarta (revisión de la tarea 12, ronda 3, nota 4).
   - *Sin test (tarea 15):* la parte "sin ausentes": un `reject` con `priority: ""` descarta (sonda
     de la revisión de la tarea 12, ronda 3), pero cambiar `drop_absent(op["args"])` por
-    `op["args"]` no rompe ningún test (should-fix 1 de esa ronda, abierto).
+    `op["args"]` no rompe ningún test (should-fix 1 de esa ronda, abierto). [resuelto en D81]
 
 **D70 · `reject` o `cancel` con solo una `plausible` de otra tool descarta** (2026-11-17) ·
 autodecidida por el orquestador; revisable
@@ -2748,7 +2749,7 @@ autodecidida por el orquestador; revisable
   - *Rutas (decisión G):* `other_tool:<fila>` (`other_tool:R2` … `:R5`), `plausible_other_tool`,
     `reject_merged`, `cancelled` y `pending_template`; `pending_provisional` queda solo para un
     registro que no está en `collecting` ni `awaiting_confirmation` (`awaiting_clarification`,
-    tarea 13), con `PENDING_NOT_SUPPORTED_YET`.
+    tarea 13), con `PENDING_NOT_SUPPORTED_YET`. [resuelto en D81]
   - *Log:* sin claves nuevas. `op=` da el registro nuevo en *Otra tool* (o el abandonado si la
     tabla no creó ninguno) y el cancelado en `cancelled`; el `operation_id` del abandonado queda
     en `history`.
@@ -2797,7 +2798,7 @@ autodecidida por el orquestador; revisable
   - *Limitación para las tareas 19 y 20 (AW 1):* un cambio de intención que cae en R3 o R4 archiva
     lo pendiente y responde la línea del descarte y la plantilla provisional, sin crear nada: el
     usuario pierde lo recopilado hasta que la 13 y la 14a reemplacen esa plantilla (revisión de la
-    tarea 12, ronda 1, nota 7, y ronda 3, nota 4).
+    tarea 12, ronda 1, nota 7, y ronda 3, nota 4). [la parte de R4, resuelta en D77]
   - *Herencia en Otra tool (tarea 14a):* "ninguna tool conserva argumentos guardados" (D3.1)
     no es observable hoy, porque R2 exige una sola `explicit` y R3/R4 no crean registro; la brief
     de la 14a debe pedir el test (un ticket pendiente con título y un turno con `create_ticket` y
@@ -2818,3 +2819,290 @@ autodecidida por el orquestador; revisable
   tests, el backlog y las briefs vuelven a valer sin tocar cientos de líneas. No cambia lo que ve
   el usuario, ni cuándo se ejecuta una tool, ni qué se guarda.
 - **Descartada:** renumerar todas las citas.
+
+**D73 · Registro de aclaración: candidatas ancladas, sin `steps` ni `asked_turn`** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** R4 y R5 guardan en `pending` el registro `{operation_id, status:
+  "awaiting_clarification", tools, candidates, missing: [], last_question}` (`new_record`,
+  `core/clarification.py`). `candidates` lleva un `{tool, args, depends_on}` por tool, la
+  `explicit` primero y las demás en el orden del intérprete; `args` sale de `merge_args(tool, {},
+  args, mensaje)`, así que ya está anclado (D4 regla 4 y *Precisa D3*), y `depends_on` llega tal
+  como vino, para la 14a. `tools` repite los nombres de las candidatas en ese orden y
+  `last_question` es la pregunta de D74. `operation_id` hace de `id` de D3. Sin `steps`,
+  `asked_turn`, `certainty` ni `attempts`. Decisión A de la brief 13 (AZ).
+- **Lo que se guarda:** con `C1`, la notificación con Carlos y el mensaje, y la reunión con Carlos
+  y `relative_days: 1`. El resumen del intérprete sigue mostrando solo los nombres de las tools, el
+  estado y la última pregunta, sin valores (D2, D14).
+- **Motivo:** D3 (*Estado*) fija el contenido: las candidatas con sus argumentos, porque el turno
+  de respuesta no ve el mensaje original y TASK.md línea 145 pide conservar lo recopilado, y sin
+  `certainty`. Las tools pendientes y la última pregunta son estado estructurado (líneas 210-216 y
+  229). Sin `steps`, ninguna rama de una operación (*Misma tool*, `_confirm`, `_repeat_pending`)
+  toma la aclaración por una operación.
+- **Precisa D3 y D27:** D3 (*Estado*) listaba `asked_turn`, que no se guarda porque ninguna regla
+  lo lee y el estado no cuenta turnos. El literal de aclaración de D27 da el mismo resumen que el
+  registro del núcleo, así que `K1`–`K3` y `S1`–`S3` se midieron con lo que el núcleo produce
+  ahora. El texto de D3 y D27 no se edita.
+- **Descartadas:** (b) guardar `asked_turn` (un contador de turnos que nadie lee); (c) las
+  candidatas en `steps` (dos formas en una clave que leen las ramas de una operación).
+- **Resuelve:** el *Pendiente* de D14 (`tools` también en una aclaración) y, de los de D3,
+  `asked_turn` e `id`.
+- **Lo prueban:** `test_r4_and_r5_store_a_clarification_and_ask` (el registro exacto de `C1` y la
+  `explicit` primero aunque llegue segunda) y `test_clarification_summary_matches_the_measured_one`.
+
+**D74 · R4 y R5 responden solo la pregunta de D3** (2026-11-17) · autodecidida por el
+orquestador; revisable
+
+- **Decisión:** el turno que crea la aclaración responde la pregunta de D3 (*Pregunta*) según el
+  número de candidatas, armada con las `action_phrase` del registro (`clarification_question`,
+  `core/replies.py`). Si el anclaje quitó un nombre, la línea fija de nombre rechazado va antes (D4
+  regla 9). Sin líneas "Anoté…": los valores de una candidata se listan cuando se elige (D75). Con
+  cuatro o más candidatas no hay aclaración y se responden las capacidades (inalcanzable con tres
+  tools). Decisión B de la brief 13 (AZ).
+- **Lo que ve el usuario:** con las dos lecturas del caso C reportadas, "¿Quieres enviar una
+  notificación, programar una reunión, o ambas?"; nada se inicia ni se ejecuta (TASK.md líneas
+  134, 137 y 338-355). Con una sola `plausible`, "¿Quieres programar una reunión? Responde sí o
+  no.". La pregunta nunca lee `ambiguity_reason` (D2).
+- **Motivo:** D3 fija la pregunta, y D4 regla 9 pide la línea de nombre rechazado y deja la lista
+  de lo heredado para el flujo que nace. Antes de elegir no se sabe de qué candidata serían los
+  valores.
+- **Descartada:** mostrar cada valor anclado de cada candidata antes de la pregunta (alarga la
+  pregunta del caso C con datos de una reunión que quizá nadie pidió).
+- **Lo prueban:** `test_r4_and_r5_store_a_clarification_and_ask` (R4, R5 con una y con dos
+  `plausible`, y un nombre no escrito) y `test_clarification_question_by_count`.
+
+**D75 · Al elegir una candidata: una línea por valor heredado y el mismo `operation_id`**
+(2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** las reglas 2 y 3 de la *Lectura de la respuesta* de D3 inician el flujo de la tool
+  elegida con los `args` de su candidata como base y los del turno fusionados encima
+  (`merge_args(tool, guardados, nuevos, mensaje)`; lo guardado no se vuelve a anclar, D4 regla 4),
+  y lo validan y dejan en `collecting` o `awaiting_confirmation` (`_start_flow`, `core/turn.py`).
+  El registro conserva el `operation_id` de la aclaración y ya no lleva `candidates`. La respuesta
+  pone primero una línea "Anoté {etiqueta}: {valor}." por campo heredado, en el orden del registro
+  (`inherited_lines`, `core/replies.py`, con la redacción de D39), después las líneas del turno
+  (cambios, notas, nombre rechazado, inválidos) y al final la pregunta o la confirmación. Nada se
+  ejecuta, aunque esté completo. Decisión C de la brief 13 (AZ).
+- **Lo que ve el usuario:** en el caso C, "Solo avísale" responde "Anoté a quién se envía:
+  Carlos.", "Anoté el mensaje: mañana revisamos el servidor." y la pregunta del canal; "Por correo"
+  muestra la confirmación y el "sí" siguiente envía la notificación una vez, sin la reunión.
+  "Avísale a Pedro" suma "Cambié a quién se envía: Carlos → Pedro." y conserva el mensaje guardado
+  (limitación de D4).
+- **Lo que se guarda:** el registro de una operación de D18, con lo heredado y lo nuevo. `changes=`
+  del log da solo lo que fusionó el mensaje del turno (D42); las líneas heredadas van solo a la
+  respuesta.
+- **Motivo:** D4 regla 9 manda que un flujo que nace de una aclaración liste todos los valores que
+  heredó, y TASK.md línea 145 pide conservar lo recopilado. El turno que resuelve nunca ejecuta ni
+  autoriza (D3, D7.1; líneas 182 y 276-284). Es el mismo registro pendiente (D3, *Estado*), así
+  que conserva su id y `op=` sigue la operación de la pregunta al "sí".
+- **Descartada:** una cabecera aparte ("De tu mensaje anterior: …"), otra plantilla para el mismo
+  contenido.
+- **Lo prueban:** `test_rule_2_starts_the_chosen_flow_with_what_was_said` (`K2` como `provide_info`
+  y como `request_action`; "por correo" y su "sí"; "Avísale a Pedro"),
+  `test_rule_3_one_candidate_yes_never_runs` y `test_case_c_through_the_node` (`route=R4`,
+  `route=clarification:regla_2` con el mismo `op=`, `route=same_tool` y `route=confirmed`).
+
+**D76 · Una aclaración resuelta a dos o más tools espera al plan de la 14a** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** si la regla 2 resuelve a dos o más candidatas, la aclaración queda como estaba
+  (`state_delta == {}`), la respuesta es `ONE_OPERATION_AT_A_TIME` ("Por ahora puedo atender una
+  operación a la vez; ¿cuál necesitas primero?") y la ruta, `clarification:regla_2`. Es
+  provisional: la 14a lo reemplaza por el plan lineal de D3 y D8, que hereda las candidatas con su
+  `depends_on`. Decisión D de la brief 13, opción (a) (AZ).
+- **Lo que ve el usuario:** "Las dos" recibe esa plantilla, y un "Solo avísale" siguiente resuelve
+  a la notificación con lo heredado. Nada se pierde ni se ejecuta.
+- **Motivo:** el precedente es el `ONE_OPERATION_AT_A_TIME` de R3 desde la 03. Conserva lo dicho
+  (TASK.md línea 145) sin elegir por el usuario.
+- **Descartadas:** (b) archivar la aclaración y responder la plantilla (pierde lo dicho, como la AW
+  1 de D71); (c) iniciar solo la primera candidata (D3 manda un plan; el código elegiría por el
+  usuario).
+- **Lo prueban:** `test_rule_2_with_two_tools_waits_for_the_plan` (`K1` tal cual y como lo midió
+  el modelo, y después `K2` sobre el mismo registro) y `test_measured_answers_through_the_core`
+  (`K1` de la 06).
+- **Pendiente:** *caso C, tercera lectura (tarea 14a):* la pregunta ofrece "o ambas" y "Las dos"
+  recibe la plantilla, pero TASK.md líneas 344-350 listan "Ambas operaciones" como tercera lectura
+  del caso C. La 14a debe conservarlo como criterio propio (`K1` sobre el registro de `C1` forma
+  el plan); si la 14a se recorta, la 20 lo lista como limitación (revisión de la tarea 13, ronda
+  1, nota 2).
+
+**D77 · Regla 4 de la aclaración: la línea del descarte de D64** (2026-11-17) · autodecidida por
+el orquestador; revisable
+
+- **Decisión:** la regla 4 (una tool `explicit` fuera de las candidatas, con `request_action`,
+  `provide_info`, `reject` o `cancel`) es la rama *Otra tool* de la 12, ahora en un ayudante que
+  usan las dos (`_change_of_intention`, `core/turn.py`): la aclaración se archiva como `abandoned`
+  (D78), la tabla corre sobre todas las operaciones del turno sin heredar nada (D3.1) y la
+  respuesta antepone "No voy a {acciones}; descarté lo que tenía pendiente." con las acciones de
+  las candidatas, tras la línea de D10 si la hay (D41). Decisión E de la brief 13, opción (a)
+  (AZ).
+- **Lo que ve el usuario:** con la aclaración del caso C, "Mejor crea un ticket para revisar el
+  servidor" responde "No voy a enviar una notificación ni programar una reunión; descarté lo que
+  tenía pendiente.", la línea "Anoté…" de la descripción y la pregunta del ticket, que nace solo
+  con su descripción y con otro `operation_id`.
+- **Lo que se guarda:** R2 escribe el registro nuevo, y R4 y R5 una aclaración nueva; R3 no crea
+  nada, así que `pending` queda vacío hasta la 14a. Desde esta tarea, un *Otra tool* que cae en R4
+  tampoco pierde lo del turno: guarda las candidatas nuevas y nada de lo abandonado.
+- **Motivo:** D3.1 llama cambio de intención a la regla 4, y D64 pone la línea en todo cambio de
+  intención: el usuario lee lo mismo siempre que algo pendiente se deja de lado (TASK.md líneas
+  282-284 y 395-417).
+- **Descartadas:** (b) la frase de la regla 1 ("No inicié ninguna acción.") antes del flujo nuevo
+  (cierta, pero una segunda redacción del mismo hecho); (c) sin línea, como si nada estuviera
+  pendiente.
+- **Resuelve:** la parte de R4 del *Pendiente* de D71 (AW 1); queda R3 (14a; 19 y 20 mientras
+  tanto).
+- **Lo prueban:** `test_rule_4_is_a_change_of_intention` (los cuatro actos,
+  `clarification:regla_4:R2`), `test_rule_4_into_r3_empties_pending` (`clarification:regla_4:R3`)
+  y `test_change_of_intention_into_r4_keeps_the_new_candidates` (`other_tool:R4` desde un ticket
+  pendiente).
+
+**D78 · Una aclaración cerrada va a `history` con sus candidatas como pasos** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** la regla 1 cierra la aclaración como `cancelled` y la regla 4 como `abandoned`.
+  Las dos vacían `pending` y agregan a `history` `{operation_id, status, steps}` con las
+  candidatas como `{tool, args}`, en su orden y sin `depends_on`, que no es un argumento
+  (`candidate_steps`, `core/clarification.py`; `_closed_without_running` recibe ahora los pasos).
+  Es la forma de D65. La regla 1 responde la frase fija de D3, "No inicié ninguna acción. Dime qué
+  necesitas cuando quieras." (`NO_ACTION_STARTED`), y no la línea de D66. Decisión F de la brief
+  13 (AZ).
+- **Lo que ve el usuario:** con la aclaración del caso C, "No, la reunión no" responde esa frase,
+  porque un rechazo nunca selecciona (D3, regla 1), y un "sí" posterior, "No hay ninguna operación
+  pendiente." (TASK.md línea 284).
+- **Motivo:** D6 manda archivar lo cancelado y lo abandonado, y la aclaración es el mismo registro
+  pendiente (D3, *Estado*); así `history` tiene una sola forma de cierre sin ejecutar. D66 descartó
+  la frase de la regla 1 para una operación ya iniciada; aquí nada se había iniciado.
+- **Descartadas:** no archivarla (contradice D6); una clave `candidates` en la entrada (dos formas
+  en `history`).
+- **Lo prueban:** `test_rule_1_discards_the_clarification` (`S2` y `cancel`),
+  `test_closing_without_running_keeps_the_last_ten` (un caso nuevo: la regla 1 sobre un `history`
+  de 10 lo deja en 10) y `test_clarification_cancel_through_the_node`.
+
+**D79 · `question` y `other` durante una aclaración: la regla 5** (2026-11-17) · autodecidida por
+el orquestador; revisable
+
+- **Decisión:** con una aclaración pendiente, `question` y `other` caen en la regla 5: se repite
+  la misma pregunta y nada cambia (D3.2), como en cualquier respuesta no clara. Decisión G de la
+  brief 13 (AZ).
+- **Lo que ve el usuario:** con la aclaración del caso C, "¿Puedes enviar notificaciones por SMS?"
+  repite "¿Quieres enviar una notificación, programar una reunión, o ambas?" y no contesta la
+  pregunta.
+- **Motivo:** D3 (*Pendiente*) dejaba el caso sin asignar y decía que cuenta como respuesta no
+  clara; la regla 5 lo cubre sin una rama que la *Lectura* de D3 no tiene.
+- **Precisa D67:** su respuesta (las capacidades sin pregunta y lo pendiente) vale para
+  `collecting` y `awaiting_confirmation`, no para una aclaración. El texto de D67 no se edita.
+- **Descartada:** la respuesta de D67, que contesta mejor una pregunta de capacidades pero añade
+  una rama a la *Lectura* de D3.
+- **Resuelve:** de los de D3, "una `question` durante una aclaración".
+- **Lo prueban:** `test_clarification_answer_rules` (`Q1` y `K3`) y
+  `test_rule_5_repeats_the_question` (dos veces seguidas, sin descarte).
+- **Pendiente:** *limitación para la tarea 20:* una pregunta con una aclaración pendiente solo
+  repite la pregunta.
+
+**D80 · Reglas 2 y 3: la operación de la tool elegida se fusiona aunque llegue `plausible`**
+(2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** en las reglas 2 y 3, la operación del turno de una tool elegida se fusiona con lo
+  heredado sea cual sea su `certainty` (`chosen`, `core/clarification.py`): `certainty` decide qué
+  se elige (D3, *Frontera con D2*), no qué datos entran a la candidata elegida. Elección señalada
+  por el implementador de la 13 (BA 1).
+- **Lo que ve el usuario:** con una sola candidata, un "sí" que el modelo devuelve con una
+  `plausible` de esa tool que cambia el destinatario resuelve por la regla 3, muestra el cambio y
+  pide confirmación. Nada se ejecuta.
+- **Lo que se guarda:** los datos de esa operación entran al registro nuevo y pasan por la
+  validación y la confirmación (D7.1).
+- **Motivo:** la respuesta ya resolvió la aclaración a esa tool, así que la operación solo agrega
+  datos a una elección hecha, como en *Misma tool*, que ignora `certainty` (D2). Lo fusionado se
+  muestra antes del "sí" (TASK.md líneas 145 y 276-284).
+- **Descartada:** ignorar los datos de una `plausible` de la tool elegida (el usuario tendría que
+  repetirlos).
+- **Pendiente:**
+  - *Sin test:* solo se vio en las sondas de la revisión de la tarea 13 (ronda 1).
+  - *Limitación para la tarea 20 (BA):* con una aclaración de una sola candidata, un "sí" que trae
+    también una tool fuera del catálogo resuelve por la regla 3: muestra la línea de D10 e inicia
+    el flujo. El veto de D45 vale solo para `collecting` y `awaiting_confirmation`. Nada se
+    ejecuta. Tampoco tiene test.
+
+**D81 · Tarea 13: la aclaración en el turno** (2026-11-17) · autodecidida por el orquestador;
+revisable
+
+- **Decisión:** con un registro `awaiting_clarification`, `_decide` (`core/turn.py`) llama a
+  `_clarification_gate` después de D11 y antes de mirar `confirm` (D3, *Compuerta de entrada*,
+  paso 2), y `answer_rule` (`core/clarification.py`) da la regla de la *Lectura de la respuesta*
+  de D3, con D3.1 y D3.2: mira `act`, `certainty`, `confirms_tool` y los nombres de las
+  candidatas, nunca el texto ni `ambiguity_reason` (D2). Los detalles no cambian lo que ve el
+  usuario, cuándo se ejecuta una tool ni qué se guarda más allá de D73–D80, así que van en una
+  línea cada uno (regla del autor desde la tarea 07):
+  - *Rutas (decisión H):* R4 y R5 conservan su nombre al crear la aclaración; la respuesta da
+    `clarification:regla_1`, `:regla_2`, `:regla_3`, `:regla_4:<fila>` (`:R2` … `:R5`) y
+    `:regla_5`. Desaparecen la ruta `pending_provisional`, su guarda y `PENDING_NOT_SUPPORTED_YET`.
+  - *Log:* sin claves nuevas. `op=` da la aclaración, el flujo que nace de ella (el mismo id, D75)
+    o el registro nuevo de la regla 4.
+  - *`changes=` en R4 y R5 (BA 2):* lleva los `fill` anclados de todas las candidatas, como R2
+    (D42), sin decir de qué tool es cada campo.
+  - *Regla 5:* `state_delta == {}`. Una aclaración no se reevalúa contra `now`, porque no tiene
+    pasos validados (D57 no aplica).
+  - *D10 y D11 (D41, D54 (c)):* la línea de D10, que antepone `handle_turn`, precede a toda
+    respuesta de la aclaración; dos operaciones de una tool responden D11, porque las candidatas
+    no son tools pendientes y D11.1 no las une.
+  - *Módulos (nota (A13)):* `core/clarification.py` (registro, lectura, elegidas y pasos para
+    `history`) y `core/operations.py`, adonde pasan `filter_by_registry`, `_contract_keys` y
+    `_join_split_operations` sin cambiar su lógica; la última se llama ahora
+    `join_split_operations`, porque cruza de módulo (revisión de la tarea 13, ronda 1, nota 5).
+    `core/turn.py` las importa, así que `from core.turn import filter_by_registry` sigue valiendo.
+    Ninguno importa ADK.
+  - *Juez del caso C (D53):* se borran `clarification_rule` y `CANDIDATES`; `_probe` pasa `S3`
+    por `handle_turn` sobre la aclaración que el núcleo crea con el fijo de `C1` y lee la regla de
+    la ruta (cualquier otra, como `d11`, no es `regla_5`). Ningún valor esperado cambió, y
+    `--round 2` sobre la ronda 2 de la 10c sigue dando `S3 regla_5 PASA` y `Resultado: revertir`.
+  - *Actos sueltos del juez (nota (nnn)):* `EDGES` suma `S3` como `cancel` sin operaciones
+    (`regla_1`, no pasa), `reject` y `provide_info` con `create_ticket` (`regla_4`) y
+    `provide_info` con `send_notification` (`regla_2`, no pasa). El "(pasa)" de la brief para el
+    primero era una errata: `S3` solo pasa con `regla_5` (D2, *Sondas*; nota 1 de la revisión).
+  - *Salidas medidas por el núcleo:* `K1` cae en la regla 2 con dos tools (D76), `K2` en la 2,
+    `K3` y `S1` en la 5, `S2` en la 1, `S3` de la 06 y de la ronda 1 de la 10c en la 2 (resuelve a
+    la notificación: el fallo de D52 tal como se midió) y `S3` de la ronda 2 en la 5. Ninguna
+    corre una tool.
+  - *`ambiguity_reason`:* nulo, el texto del fijo u otro que nombra la reunión dan, con `C1`, `K2`
+    y `S3`, la misma ruta, la misma respuesta y el mismo delta (D2, *Solo para logs*).
+  - *(A11):* `_PLAIN_NO` suma un `reject` de `create_ticket` con `priority: ""` y `assignee`
+    nulo, que descarta como un "no" sin argumentos: fija la parte "sin ausentes" de D69.
+  - *Tests reescritos:* `test_r3_r4_r5_do_not_start_anything_yet` afirma ahora que R4 y R5 guardan
+    una aclaración sin `steps`; `test_same_tool_needs_a_collecting_record` toma el registro de `C1`,
+    y `K2` da `clarification:regla_2`, nunca `same_tool`; `test_clarification_stays_provisional` se
+    borra (lo reemplazan los de las reglas 1 y 4); el caso `other_tool:R4` de
+    `test_reject_or_cancel_with_another_tool_is_a_change_of_intention` pasa a
+    `test_change_of_intention_into_r4_keeps_the_new_candidates`.
+- **Lo que ve el usuario (caso C):** con interpretaciones fijas, el caso C pregunta, resuelve a lo
+  elegido con lo ya dicho y ejecuta solo tras el "sí" (TASK.md líneas 282-284 y 338-355). Con el
+  modelo real sigue la limitación de D52: `C1` llega como una sola notificación y no hay
+  aclaración.
+- **Motivo:** RF-02 pide no ejecutar por asociación ni tomar una intención ambigua como
+  autorización, y pedir una aclaración (TASK.md líneas 128-137); RF-03 y RF-05, conservar lo dicho
+  y no inventar (líneas 143-145 y 182-184); RF-07, las tools pendientes como estado estructurado
+  (líneas 210-216 y 229). Las preguntas 3 y 10 de §9 (líneas 555 y 562): la tabla y la lectura
+  cuentan operaciones y nunca nombran una tool.
+- **Resuelve:** el *Pendiente* de D53 (*Copia de D3*), el *Sin test* de D69, la parte de la
+  aclaración de D41 (*Alcance real*) y de D42 (*Solo `collecting`*) y la ruta `pending_provisional`
+  de D71.
+- **Lo prueban:** los de `tests/test_clarification.py` (`test_clarification_answer_rules`,
+  `test_measured_answers_through_the_core`, `test_ambiguity_reason_changes_no_decision`,
+  `test_clarification_and_the_d10_and_d11_lines` y los citados en D73–D79),
+  `test_case_c_through_the_node`, `test_clarification_cancel_through_the_node`,
+  `test_core_imports_no_adk` (con los dos módulos nuevos) y los del juez (`test_judge_edges`,
+  `test_10c_runs_as_recorded`, `test_06_run_reproduces_the_hand_reading`, `test_fixed_outputs_pass`
+  y `test_cli_prints_one_line_per_id_and_the_outcome`), sin cambiar ningún valor esperado.
+- **Pendiente:**
+  - *Cuatro candidatas (nota 3):* `test_four_candidates_answer_the_capabilities` solo comprueba que
+    `new_record` devuelve `None`; ningún test ejecuta la rama de `_rules_table` que responde las
+    capacidades. Es inalcanzable con tres tools.
+  - *`changes=` en R4 y R5 (nota 4):* dos tools con un campo del mismo nombre no se distinguirían
+    en el log; con el catálogo actual no hay colisión. Las tareas 19 y 20 lo dicen junto al
+    *Pendiente* de D21, y la 14a lo tiene en cuenta si suma la tool al log (D44, *Log*).
+  - *Legibilidad (nota 6):* el nombre de `test_r3_r4_r5_do_not_start_anything_yet` ya no dice lo
+    que afirma, y la variable local `chosen` de `answer_rule` comparte nombre con la función
+    `chosen` del módulo (sin efecto).
+  - *AW 1 en R3 (D71):* un cambio de intención, o una regla 4, que cae en R3 sigue vaciando
+    `pending` (14a; 19 y 20 mientras tanto).
+  - *Tamaño:* `core/turn.py` tiene 600 líneas, justo en el límite de la brief; la 14a no cabe sin
+    partirlo más y su brief debe preverlo (nota 6).
