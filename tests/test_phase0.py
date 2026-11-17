@@ -1,11 +1,16 @@
 """The phase 0 harness with the scripted fake model: no real call, no `.env` (task 05)."""
 
+import asyncio
 import io
 import json
+import logging
 from typing import Any
 
 import pytest
+from google.adk.models import Gemini
 
+import assistant.agent
+import assistant.interpreter
 import phase0.run
 from core.instruction import NOTHING_PENDING, pending_summary
 from core.interpretation import TurnInterpretation
@@ -248,12 +253,14 @@ def test_run_writes_the_jsonl_and_prints_the_report(monkeypatch, tmp_path, capsy
     fake = ScriptedLlm(script=[_expected_json(s.fixture) for s in SCENARIOS])
     real_run = phase0.run.run_scenarios
 
-    async def fake_run(model, scenarios, out):
-        assert model == phase0.run.MODEL
-        return await real_run(fake, scenarios, out, delay=0)
+    async def fake_run(model, scenarios, out, **kwargs):
+        assert model.model == phase0.run.MODEL
+        assert kwargs == {"saved": None}
+        return await real_run(fake, scenarios, out, delay=0, **kwargs)
 
     monkeypatch.setattr(phase0.run, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(phase0.run, "load_dotenv", lambda: None)
+    monkeypatch.setattr(phase0.run, "_log_http_retries", lambda: None)
     monkeypatch.setattr(phase0.run, "run_scenarios", fake_run)
 
     assert phase0.run.main(["--run"]) == 0
@@ -265,3 +272,207 @@ def test_run_writes_the_jsonl_and_prints_the_report(monkeypatch, tmp_path, capsy
     printed = capsys.readouterr().out
     assert "0/23 → se sigue con la opción B" in printed
     assert f"Salida cruda: {path}" in printed
+    assert "Reanudados" not in printed
+
+
+# Round 2 of task 06: retries and `--resume`, with the fake model (no real call, no `.env`).
+
+
+def _patch_main(monkeypatch, tmp_path, fake: ScriptedLlm) -> list:
+    """`main(["--run", ...])` with `fake` in place of Gemini; returns the models it was given."""
+    handed = []
+    real_run = phase0.run.run_scenarios
+
+    async def fake_run(model, scenarios, out, **kwargs):
+        handed.append(model)
+        return await real_run(fake, scenarios, out, delay=0, **kwargs)
+
+    monkeypatch.setattr(phase0.run, "RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(phase0.run, "load_dotenv", lambda: None)
+    monkeypatch.setattr(phase0.run, "_log_http_retries", lambda: None)
+    monkeypatch.setattr(phase0.run, "run_scenarios", fake_run)
+    return handed
+
+
+def _previous_jsonl(path, valid: list[str], failed: list[str]) -> list[str]:
+    """A previous run's file: valid outputs for `valid`, a model error for `failed`.
+
+    Synchronous, because the tests that use it call `main`, which runs its own event loop.
+    """
+    out = io.StringIO()
+
+    async def write() -> None:
+        for key in valid:
+            fake = ScriptedLlm(script=[_expected_json(BY_ID[key].fixture)])
+            await run_scenarios(fake, [BY_ID[key]], out, delay=0)
+        for key in failed:
+            await run_scenarios(ScriptedLlm(script=[quota_error()]), [BY_ID[key]], out, delay=0)
+
+    asyncio.run(write())
+    path.write_text(out.getvalue(), encoding="utf-8")
+    return out.getvalue().splitlines()
+
+
+# (e)
+def test_retries_only_in_the_harness(monkeypatch, tmp_path):
+    model = phase0.run.harness_model()
+    assert isinstance(model, Gemini)
+    assert model.model == phase0.run.MODEL
+    options = model.retry_options
+    assert options.attempts == 3
+    assert set(options.http_status_codes) == {429, 503}
+    assert options.initial_delay == 2
+    assert options.max_delay == 30
+
+    fake = ScriptedLlm(script=[_expected_json(s.fixture) for s in SCENARIOS])
+    handed = _patch_main(monkeypatch, tmp_path, fake)
+    assert phase0.run.main(["--run"]) == 0
+    [given] = handed
+    assert isinstance(given, Gemini)
+    assert given.retry_options == phase0.run.RETRY_OPTIONS
+
+    # The agent itself keeps D1.1: a plain model name and no retry setting on the turn node.
+    assert assistant.interpreter.interpreter.model == phase0.run.MODEL
+    assert isinstance(assistant.interpreter.interpreter.model, str)
+    turn_node = assistant.agent.root_agent.edges[0][1]
+    assert turn_node.retry_config is None
+
+
+def test_retry_log_goes_to_stderr_once():
+    logger = logging.getLogger(phase0.run.SDK_LOGGER)
+    level, handlers = logger.level, list(logger.handlers)
+    try:
+        phase0.run._log_http_retries()
+        phase0.run._log_http_retries()
+        assert logger.level == logging.INFO
+        added = [h for h in logger.handlers if h not in handlers]
+        assert [h.get_name() for h in added] == [phase0.run.APP_NAME]
+    finally:
+        logger.setLevel(level)
+        logger.handlers[:] = handlers
+
+
+# (f)
+def test_resume_calls_only_what_was_not_saved(monkeypatch, tmp_path, capsys):
+    previous = tmp_path / "previous.jsonl"
+    old_lines = _previous_jsonl(previous, valid=["A1", "C1", "F2"], failed=["D1"])
+    # A1 written with escapes and sorted keys: the same record, other bytes. Copying keeps
+    # them; serializing the record again would not.
+    old_lines[0] = json.dumps(json.loads(old_lines[0]), ensure_ascii=True, sort_keys=True)
+    assert old_lines[0] != json.dumps(json.loads(old_lines[0]), ensure_ascii=False)
+    previous.write_text("\n".join(old_lines) + "\n", encoding="utf-8")
+    before = previous.read_bytes()
+    missing = [s for s in SCENARIOS if s.id not in {"A1", "C1", "F2"}]
+    fake = ScriptedLlm(script=[_expected_json(s.fixture) for s in missing])
+    _patch_main(monkeypatch, tmp_path, fake)
+
+    assert phase0.run.main(["--run", "--resume", str(previous)]) == 0
+
+    assert fake.calls == 20  # D1 (the error) is called again
+    assert [contents_text(r) for r in fake.requests] == [
+        [FIXED[s.fixture].message] for s in missing
+    ]
+    [path] = (tmp_path / "runs").iterdir()
+    new_lines = path.read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line)["id"] for line in new_lines] == [s.id for s in SCENARIOS]
+    by_id = {json.loads(line)["id"]: line for line in new_lines}
+    for line in old_lines[:3]:
+        assert by_id[json.loads(line)["id"]] == line  # copied unchanged
+    assert json.loads(by_id["D1"])["error"] is None
+    assert previous.read_bytes() == before
+    printed = capsys.readouterr().out
+    assert f"Reanudados de `{previous}`: 3; llamadas en esta corrida: 20" in printed
+    assert "Veredicto F0.1: 0/23 → se sigue con la opción B" in printed
+
+
+# (g)
+def test_model_error_while_resuming_stops_without_verdict(monkeypatch, tmp_path, capsys):
+    previous = tmp_path / "previous.jsonl"
+    _previous_jsonl(previous, valid=["A1"], failed=[])
+    fake = ScriptedLlm(script=[_expected_json("B2"), quota_error()])
+    _patch_main(monkeypatch, tmp_path, fake)
+
+    assert phase0.run.main(["--run", "--resume", str(previous)]) == 1
+
+    assert fake.calls == 2
+    [path] = (tmp_path / "runs").iterdir()
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert [line["id"] for line in lines] == ["A1", "B2", "C1"]
+    assert lines[-1]["error"].startswith("ClientError")
+    printed = capsys.readouterr().out
+    assert "Corrida detenida en C1" in printed
+    assert "sin veredicto" in printed
+    assert "Veredicto F0.1" not in printed
+    assert "llamadas en esta corrida: 2" in printed
+
+
+def _damaged(lines: list[str], damage: str) -> tuple[list[str], str]:
+    """The previous file's lines with one damage, and the reason `load_saved` must give.
+
+    A damaged `A1` line replaces the good one, so only the check named by `damage` can
+    reject it (an appended `A1` line would be caught as a repeated id first).
+    """
+    first = json.loads(lines[0])
+
+    def replace_first(**changes) -> list[str]:
+        return [json.dumps({**first, **changes}, ensure_ascii=False), *lines[1:]]
+
+    return {
+        "unknown id": ([*lines, json.dumps({**first, "id": "Z9"})], "escenario desconocido"),
+        "repeated id": ([*lines, lines[0]], "escenario repetido"),
+        "other message": (replace_first(message="otro mensaje"), "no coincide"),
+        "other fixture": (replace_first(fixture="T1"), "no coincide"),
+        "not json": ([*lines, "{"], "no es JSON"),
+    }[damage]
+
+
+# (h)
+@pytest.mark.parametrize(
+    "damage", ["unknown id", "repeated id", "other message", "other fixture", "not json"]
+)
+def test_invalid_previous_file_calls_nothing(monkeypatch, tmp_path, capsys, damage):
+    previous = tmp_path / "previous.jsonl"
+    lines, reason = _damaged(_previous_jsonl(previous, valid=["A1", "B2"], failed=[]), damage)
+    previous.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    fake = ScriptedLlm(script=[])
+    _patch_main(monkeypatch, tmp_path, fake)
+    monkeypatch.setattr(phase0.run, "load_dotenv", lambda: pytest.fail("read .env"))
+
+    assert phase0.run.main(["--run", "--resume", str(previous)]) == 2
+
+    assert fake.calls == 0
+    assert not (tmp_path / "runs").exists()
+    err = capsys.readouterr().err
+    assert "No se puede reanudar" in err
+    assert reason in err
+
+
+async def test_wait_runs_only_between_real_calls(monkeypatch):
+    previous = io.StringIO()
+    for key in ("A1", "C1"):
+        fake = ScriptedLlm(script=[_expected_json(BY_ID[key].fixture)])
+        await run_scenarios(fake, [BY_ID[key]], previous, delay=0)
+    saved = {json.loads(line)["id"]: line for line in previous.getvalue().splitlines()}
+    waits = []
+    real_sleep = asyncio.sleep
+
+    async def recorded_sleep(seconds, *args, **kwargs):
+        if seconds == 7.5:  # only the harness's wait; ADK may sleep(0) on its own
+            waits.append(seconds)
+        return await real_sleep(0)
+
+    monkeypatch.setattr(phase0.run.asyncio, "sleep", recorded_sleep)
+    called = [BY_ID[key] for key in ("B2", "D1", "E1")]
+    fake = ScriptedLlm(script=[_expected_json(s.fixture) for s in called])
+    scenarios = [BY_ID[key] for key in ("A1", "B2", "C1", "D1", "E1")]
+
+    result = await run_scenarios(fake, scenarios, delay=7.5, saved=saved)
+
+    assert (result.resumed, result.called, fake.calls) == (2, 3, 3)
+    assert waits == [7.5, 7.5]  # B2 -> D1 and D1 -> E1; none before the first real call
+
+
+def test_resume_needs_run(tmp_path):
+    with pytest.raises(SystemExit) as exit_info:
+        phase0.run.main(["--resume", str(tmp_path / "previous.jsonl")])
+    assert exit_info.value.code == 2

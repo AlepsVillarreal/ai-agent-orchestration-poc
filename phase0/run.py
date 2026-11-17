@@ -2,31 +2,36 @@
 
     uv run python -m phase0.run          # list the scenarios; no model, no `.env`, no files
     uv run python -m phase0.run --run    # one real model call per scenario (task 06)
+    uv run python -m phase0.run --run --resume RUTA   # call only what RUTA did not save
 
 Run it from the repository root: `phase0.scenarios` imports `tests.interpretations`.
 
 The interpreter runs alone (it measures the schema, not the core): a `Runner` over the agent of
 `build_interpreter` and an in-memory session per scenario whose state holds the pending record,
-so the instruction carries the pending summary of D14. One call per scenario, no retries
-(D1.1). The raw output goes to a JSONL file in `phase0/runs/`; what the code would do with it
-is judged by hand in task 06. The only number that decides anything is the count of shape
-failures (F0.1).
+so the instruction carries the pending summary of D14. One call per scenario. The raw output
+goes to a JSONL file in `phase0/runs/`; what the code would do with it is judged by hand in
+task 06. The only number that decides anything is the count of shape failures (F0.1).
+
+Retries (task 06, round 2, the author's decision after a 503): only this harness gives the
+model `HttpRetryOptions`, so the google-genai client retries a 429 or a 503 with exponential
+backoff and jitter, up to 3 attempts. The turn node and `assistant/` keep D1.1: no retries.
 """
 
 import argparse
 import asyncio
 import copy
 import json
+import logging
 import re
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
 from dotenv import load_dotenv
 from google.adk import Runner
-from google.adk.models import BaseLlm
+from google.adk.models import BaseLlm, Gemini
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from pydantic import ValidationError
@@ -40,7 +45,18 @@ from tests.interpretations import FIXED
 APP_NAME = "phase0"
 USER_ID = "phase0"
 RUNS_DIR = Path(__file__).parent / "runs"
-DELAY_SECONDS = 6.0  # between calls (10 per minute); check the real limit before --run (D2)
+# Between calls. ai.google.dev/gemini-api/docs/rate-limits (-> aistudio.google.com/docs/
+# rate-limits), read 2026-11-17: no free-tier RPM/RPD/TPM for gemini-3.5-flash-lite, so 13 s
+# (fits 5 RPM) as task 06 sets; never a guessed higher limit (D2).
+DELAY_SECONDS = 13.0
+# Harness only (autodecided R: 429 and 503 are the API's "try again" codes; a 500 may be the
+# request's fault). `exp_base` and `jitter` stay at the SDK's defaults (2 and 1): waits of
+# about 2 s and 4 s, at most 30 s. The SDK also retries its transient network errors.
+RETRY_OPTIONS = types.HttpRetryOptions(
+    attempts=3, initial_delay=2.0, max_delay=30.0, http_status_codes=[429, 503]
+)
+# The google-genai logger that writes one INFO line before each retry (autodecided S).
+SDK_LOGGER = "google_genai._api_client"
 
 EMPTY = "empty"
 VALIDATION = "validation"
@@ -70,6 +86,9 @@ class RunResult:
     total: int  # scenarios asked for
     records: list[Record] = field(default_factory=list)
     stopped_at: str | None = None  # id of the scenario whose call raised
+    resumed: int = 0  # records copied from a previous run (`--resume`)
+    called: int = 0  # scenarios sent to the model in this run
+    resumed_from: str | None = None  # the previous JSONL, if any
 
 
 def strip_code_fence(text: str) -> str:
@@ -153,21 +172,34 @@ async def run_scenarios(
     scenarios: list[Scenario] = SCENARIOS,
     out: TextIO | None = None,
     delay: float = DELAY_SECONDS,
+    saved: dict[str, str] | None = None,
 ) -> RunResult:
     """One new session and one call per scenario, in order; one JSONL line each to `out`.
 
-    A model exception is recorded as `"<Type>: <message>"`, is not a shape failure and stops
-    the run (no retry: D1.1).
+    A scenario in `saved` (id → its JSONL line from a previous run, see `load_saved`) is not
+    called: its line is written unchanged. The wait runs only between real calls. A model
+    exception (after the SDK's retries, if the model has any) is recorded as
+    `"<Type>: <message>"`, is not a shape failure and stops the run.
     """
     name = model if isinstance(model, str) else model.model
     runner = Runner(
         app_name=APP_NAME, agent=build_interpreter(model), session_service=InMemorySessionService()
     )
     result = RunResult(model=name, total=len(scenarios))
+    saved = saved or {}
 
-    for index, scenario in enumerate(scenarios):
-        if index and delay:
+    for scenario in scenarios:
+        if scenario.id in saved:
+            line = saved[scenario.id]
+            result.records.append(Record(**json.loads(line)))
+            result.resumed += 1
+            if out is not None:
+                out.write(line + "\n")
+                out.flush()
+            continue
+        if result.called and delay:
             await asyncio.sleep(delay)
+        result.called += 1
         record = Record(
             id=scenario.id,
             fixture=scenario.fixture,
@@ -176,7 +208,7 @@ async def run_scenarios(
         )
         try:
             record.raw = await _call(runner, runner.session_service, scenario)
-        except Exception as ex:  # 429, timeout, missing key...: stop, do not retry
+        except Exception as ex:  # 429/503 after the retries, timeout, missing key...: stop
             record.error = f"{type(ex).__name__}: {ex}"
             result.stopped_at = scenario.id
         else:
@@ -208,6 +240,11 @@ def format_report(result: RunResult) -> str:
     run = len(result.records)
     failures = [r for r in result.records if r.shape_failure]
     lines = [f"Modelo: {result.model}", f"Escenarios corridos: {run} de {result.total}"]
+    if result.resumed_from:
+        lines.append(
+            f"Reanudados de `{result.resumed_from}`: {result.resumed}; "
+            f"llamadas en esta corrida: {result.called}"
+        )
 
     if failures:
         lines.append(f"Fallos de forma: {len(failures)}")
@@ -244,17 +281,82 @@ def list_scenarios() -> str:
         lines.append(f"  {scenario.id:<3} [{status}] {FIXED[scenario.fixture].message}")
     lines += [
         "",
-        f"--run hace {len(SCENARIOS)} llamadas a {MODEL}, una por escenario, sin reintentos.",
+        f"--run hace {len(SCENARIOS)} llamadas a {MODEL}, una por escenario; el cliente "
+        f"reintenta un 429 o un 503 hasta {RETRY_OPTIONS.attempts} intentos.",
     ]
     return "\n".join(lines)
 
 
-async def _run_and_save() -> int:
+class ResumeError(Exception):
+    """The previous JSONL cannot be resumed; nothing has been called or written."""
+
+
+def load_saved(path: Path) -> dict[str, str]:
+    """The lines of a previous JSONL that `--resume` copies, by scenario id.
+
+    A scenario is saved if its line has a `raw` and no `error`. Every line must be a record of
+    this harness for a current scenario (same `fixture` and `message`), each id once;
+    otherwise `ResumeError`. The lines are returned exactly as read, without the newline.
+    """
+    by_id = {scenario.id: scenario for scenario in SCENARIOS}
+    keys = {item.name for item in fields(Record)}
+    try:
+        lines = path.read_bytes().decode("utf-8").split("\n")
+    except (OSError, UnicodeDecodeError) as ex:
+        raise ResumeError(f"no se pudo leer {path}: {ex}") from ex
+    if lines and lines[-1] == "":
+        lines.pop()  # the newline that ends the last line
+
+    saved: dict[str, str] = {}
+    seen: set[str] = set()
+    for number, line in enumerate(lines, start=1):
+        where = f"{path}, línea {number}"
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as ex:
+            raise ResumeError(f"{where}: no es JSON ({ex})") from ex
+        if not isinstance(record, dict) or set(record) != keys:
+            raise ResumeError(f"{where}: no es un registro de este arnés")
+        scenario = by_id.get(record["id"])
+        if scenario is None:
+            raise ResumeError(f"{where}: escenario desconocido {record['id']!r}")
+        if record["id"] in seen:
+            raise ResumeError(f"{where}: escenario repetido {record['id']!r}")
+        seen.add(record["id"])
+        if (
+            record["fixture"] != scenario.fixture
+            or record["message"] != FIXED[scenario.fixture].message
+        ):
+            raise ResumeError(f"{where}: {record['id']} no coincide con el escenario actual")
+        if record["raw"] is not None and record["error"] is None:
+            saved[record["id"]] = line
+    return saved
+
+
+def harness_model() -> Gemini:
+    """The real model of `--run`: Gemini with the harness's retries (the turn node has none)."""
+    return Gemini(model=MODEL, retry_options=RETRY_OPTIONS)
+
+
+def _log_http_retries() -> None:
+    """Under `--run`, one stderr line per SDK retry, to count HTTP requests (autodecided S)."""
+    logger = logging.getLogger(SDK_LOGGER)
+    logger.setLevel(logging.INFO)
+    if not any(handler.get_name() == APP_NAME for handler in logger.handlers):
+        handler = logging.StreamHandler(sys.stderr)
+        handler.set_name(APP_NAME)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+        logger.addHandler(handler)
+
+
+async def _run_and_save(saved: dict[str, str] | None, resumed_from: Path | None) -> int:
     RUNS_DIR.mkdir(exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     path = RUNS_DIR / f"{stamp}-{MODEL}.jsonl"
     with path.open("w", encoding="utf-8") as out:
-        result = await run_scenarios(MODEL, SCENARIOS, out)
+        result = await run_scenarios(harness_model(), SCENARIOS, out, saved=saved)
+    if resumed_from is not None:
+        result.resumed_from = str(resumed_from)
     print(format_report(result))
     print(f"Salida cruda: {path}")
     return 1 if result.stopped_at else 0
@@ -265,13 +367,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--run", action="store_true", help="llama al modelo real, una vez por escenario"
     )
+    parser.add_argument(
+        "--resume",
+        type=Path,
+        metavar="RUTA",
+        help="con --run: copia lo guardado en ese JSONL y llama solo a lo que falta",
+    )
     args = parser.parse_args(argv)
+    if args.resume is not None and not args.run:
+        parser.error("--resume solo va junto con --run")
     if not args.run:
         print(list_scenarios())
         return 0
 
+    saved = None
+    if args.resume is not None:
+        try:
+            saved = load_saved(args.resume)
+        except ResumeError as ex:  # before `.env`, any call or any file
+            print(f"No se puede reanudar: {ex}", file=sys.stderr)
+            return 2
+
     load_dotenv()  # only with --run: the listing never reads `.env`
-    return asyncio.run(_run_and_save())
+    _log_http_retries()
+    return asyncio.run(_run_and_save(saved, args.resume))
 
 
 if __name__ == "__main__":
