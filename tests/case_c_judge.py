@@ -8,8 +8,9 @@ the round's outcome. No model is called: D3, *Método*, repeats saved outputs th
 
 - `C1`, `N1`, `A1`, `E1` (nothing pending) go through the real core: `handle_turn` gives the row
   of D3's table and `filter_by_registry` the operations the core keeps.
-- `S3` (a clarification pending) uses a copy of D3's *Lectura de la respuesta*, because the core
-  does not read clarification answers yet (task 13 replaces this copy with the core's).
+- `S3` (a clarification pending) goes through the real core too: `handle_turn` on the
+  clarification the core stores for the fixed `C1`, and the rule is read from its route
+  (`clarification:regla_<n>`; any other route, such as `d11`, is not `regla_5`).
 
 The outcome follows D33 and the author's answers for 10c: all pass → "pasa"; only `S3` fails →
 "solo_s3"; any of `C1`, `N1`, `A1`, `E1` fails → "ronda_2" in round 1, "revertir" in round 2.
@@ -26,14 +27,12 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from core.interpretation import Act, Certainty, TurnInterpretation
+from core.interpretation import TurnInterpretation
 from core.turn import TurnInput, filter_by_registry, handle_turn
-from phase0.scenarios import SCENARIOS
 from tests.interpretations import FIXED, NOW, SESSION
 
 JUDGED = ("C1", "N1", "S3", "A1", "E1")
 CORE_IDS = ("C1", "N1", "A1", "E1")  # a failure of any of these asks for round 2 or a revert
-CANDIDATES = tuple(next(s for s in SCENARIOS if s.id == "S3").pending["tools"])
 NO_OUTPUT = "sin_salida"
 
 PASS = "pasa"
@@ -102,46 +101,19 @@ def _first_message(key: str, record: dict, interpretation: TurnInterpretation) -
     return Judgement(key, row, passed, detail)
 
 
-def clarification_rule(
-    interpretation: TurnInterpretation, candidates: Iterable[str] = CANDIDATES
-) -> str:
-    """Copy of D3, *Lectura de la respuesta* (rules 1-5, D3.1 and D3.2), only to measure.
-
-    Task 13 replaces it with the core's reading. `S` is the set of tools with an `explicit`
-    operation after the registry filter; `C` the candidates.
-    """
-    candidates = set(candidates)
-    operations = filter_by_registry(interpretation)
-    act = interpretation.act
-    chosen = {op["tool"] for op in operations if op["certainty"] == Certainty.EXPLICIT}
-    plausible = {op["tool"] for op in operations if op["certainty"] == Certainty.PLAUSIBLE}
-    inside = chosen <= candidates
-
-    if act in (Act.CANCEL, Act.REJECT) and inside:
-        return "regla_1"
-    if (
-        chosen
-        and inside
-        and act in (Act.REQUEST_ACTION, Act.PROVIDE_INFO, Act.CONFIRM)
-        and not ((candidates - chosen) & plausible)
-        and (act != Act.CONFIRM or len(chosen) == 1)
-    ):
-        return "regla_2"
-    if (
-        act == Act.CONFIRM
-        and not chosen
-        and len(candidates) == 1
-        and interpretation.confirms_tool in (None, *candidates)
-    ):
-        return "regla_3"
-    if not inside and act in (Act.REQUEST_ACTION, Act.PROVIDE_INFO, Act.REJECT, Act.CANCEL):
-        return "regla_4"
-    return "regla_5"
+def _c1_clarification() -> dict:
+    """The clarification the core stores for the fixed `C1` (D3, *Estado*): what `S3` answers."""
+    fixed = FIXED["C1"]
+    interpretation = TurnInterpretation.model_validate(fixed.interpretation)
+    outcome = handle_turn(None, interpretation, TurnInput(fixed.message, NOW, SESSION))
+    return outcome.state_delta["pending"]
 
 
 def _probe(record: dict, interpretation: TurnInterpretation) -> Judgement:
     """`S3`: the message of `C1` repeated as the answer; it must not resolve (D2, *Sondas*)."""
-    rule = clarification_rule(interpretation)
+    turn_input = TurnInput(record["message"], NOW, SESSION)
+    route = handle_turn(_c1_clarification(), interpretation, turn_input).route
+    rule = route.split(":")[1] if route.startswith("clarification:") else route
     operations = filter_by_registry(interpretation)
     detail = f"act={interpretation.act.value} ops={sorted(_pairs(operations))}"
     return Judgement("S3", rule, rule == "regla_5", detail)

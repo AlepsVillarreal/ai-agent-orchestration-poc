@@ -208,7 +208,8 @@ def test_core_imports_no_adk():
     # A fresh process: in this one, another test may already have imported ADK.
     code = (
         "import sys, core.registry, core.mock_tools, core.interpretation, core.instruction, "
-        "core.presence, core.replies, core.turn, core.merge, core.validation; "
+        "core.presence, core.replies, core.turn, core.merge, core.validation, "
+        "core.clarification, core.operations; "
         "print(sorted(m for m in sys.modules if m.startswith('google.adk')))"
     )
     result = subprocess.run(

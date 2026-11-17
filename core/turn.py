@@ -17,8 +17,10 @@ Order of a turn (D3, *Compuerta de entrada*):
    the merge like any single operation. Nothing pending, another tool in the turn or `confirm`:
    D11 as written, so outside *Misma tool* two requested tickets never become one (inside it,
    two tickets with disjoint keys join into the pending one, D54).
-3. Something pending, in `collecting` or `awaiting_confirmation` (`awaiting_clarification` keeps
-   a provisional template until task 13). S = tools with `explicit` operations. In this order:
+   Then a pending clarification reads the turn as its answer before `act` (D3 gate, step 2):
+   `_clarification_gate`, with the five rules of `core/clarification.py`. Nothing runs there.
+3. Something pending, in `collecting` or `awaiting_confirmation`. S = tools with `explicit`
+   operations. In this order:
    - `confirm` -> `_confirm`, in this order: (1) an operation of another tool, or something
      the filter dropped -> repeat what is pending (author's answer to brief 10a, option (a));
      (2) `confirms_tool` naming a tool that is not pending -> the same (D7.4); (3) operations of
@@ -49,8 +51,9 @@ Order of a turn (D3, *Compuerta de entrada*):
 4. Nothing pending -> route by `act`; a request goes to the rules table (R1-R5), which counts
    operations by certainty and never looks at tool names (TASK.md line 562). R2 anchors and
    merges against an empty record (D4 rule 4), so a name not written in the message never
-   gets in and the `_add`/`_remove` buckets are applied, never stored (D4 rule 10). Every
-   record R2 creates gets an `operation_id` (a uuid, read by the log).
+   gets in and the `_add`/`_remove` buckets are applied, never stored (D4 rule 10). R4 and R5
+   store a clarification, its candidates anchored the same way. Each new record gets an
+   `operation_id` (a uuid, read by the log).
 5. After every merge (R2 and *Misma tool*, `confirm` included) each step is validated
    (`core/validation.py`, D5):
    - something missing or invalid -> `status: collecting`; `missing` and `invalid`
@@ -76,7 +79,8 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from core import replies
+from core import clarification, replies
+from core.clarification import AWAITING_CLARIFICATION
 from core.confirmation import confirmation_hash, shown_values
 from core.executions import (
     Executions,
@@ -97,8 +101,9 @@ from core.history import (
 )
 from core.interpretation import Act, Certainty, TurnInterpretation
 from core.merge import Change, MergeResult, Rejected, merge_args
+from core.operations import filter_by_registry, join_split_operations
 from core.presence import drop_absent
-from core.registry import TOOLS, FieldKind, ToolSpec, list_buckets
+from core.registry import TOOLS, ToolSpec
 from core.validation import validate
 
 COLLECTING = "collecting"
@@ -174,15 +179,15 @@ def _decide(
 ) -> TurnOutcome:
     same_tool = _is_same_tool(pending, act, operations)
     if same_tool:
-        operations = _join_split_operations(operations)  # D11.1
+        operations = join_split_operations(operations)  # D11.1
 
     tool_counts = Counter(operation["tool"] for operation in operations)
     if any(count > 1 for count in tool_counts.values()):
         return TurnOutcome(replies.ONE_PER_TOOL, route="d11")
 
     if pending:
-        if pending.get("status") not in (COLLECTING, AWAITING_CONFIRMATION):  # D3 step 2
-            return TurnOutcome(replies.PENDING_NOT_SUPPORTED_YET, route="pending_provisional")
+        if pending["status"] == AWAITING_CLARIFICATION:  # D3 gate, step 2: before `act`
+            return _clarification_gate(pending, act, operations, turn_input, confirms_tool, history)
         if act == Act.CONFIRM:
             outcome = _confirm(pending, operations, turn_input, confirms_tool, dropped_some)
             return outcome or _run_confirmed(pending, turn_input, history, executions)
@@ -195,6 +200,36 @@ def _decide(
         return TurnOutcome(replies.capabilities(), route="template")
     # `request_action`, or `provide_info` with operations, which is treated the same.
     return _rules_table(operations, turn_input)
+
+
+def _clarification_gate(
+    pending: dict,
+    act: Act,
+    operations: list[dict],
+    turn_input: TurnInput,
+    confirms_tool: str | None,
+    history: Sequence[dict],
+) -> TurnOutcome:
+    """D3 gate, step 2: the turn answers the clarification. `certainty` counts here (D3,
+    *Frontera con D2*). No rule runs a tool: a flow born here asks or confirms (D7.1)."""
+    rule = clarification.answer_rule(pending["tools"], act, operations, confirms_tool)
+    route, steps = f"clarification:regla_{rule}", clarification.candidate_steps(pending)
+    if rule == clarification.DISCARD:
+        closed = _closed_without_running(pending, CANCELLED, steps, history)
+        return TurnOutcome(replies.NO_ACTION_STARTED, state_delta=closed, route=route)
+    if rule == clarification.CHANGE_OF_INTENTION:
+        return _change_of_intention(pending, steps, operations, turn_input, history, route)
+    if rule == clarification.REPEAT:
+        return TurnOutcome(pending["last_question"], route=route)  # D3.2: nothing changes
+
+    chosen = clarification.chosen(pending, rule, operations)
+    if len(chosen) > 1:  # a plan of candidates is task 14a; the clarification stays as it is
+        return TurnOutcome(replies.ONE_OPERATION_AT_A_TIME, route=route)
+    [(tool, stored, incoming)] = chosen
+    outcome = _start_flow(tool, stored, incoming, turn_input, route, pending["operation_id"])
+    # D4 rule 9: every inherited value first, then the lines of this turn's own merge.
+    outcome.reply = "\n".join([*replies.inherited_lines(tool, stored), outcome.reply])
+    return outcome
 
 
 def _pending_gate(
@@ -215,13 +250,8 @@ def _pending_gate(
         for op in operations
     )
     if other_tool and act in (Act.REQUEST_ACTION, Act.PROVIDE_INFO, Act.REJECT, Act.CANCEL):
-        outcome = _rules_table(operations, turn_input)  # D3.1: nothing stored is inherited
-        outcome.route = f"other_tool:{outcome.route}"
-        outcome.reply = f"{_discarded_line(pending)}\n{outcome.reply}"
-        # R2 writes the new record; R3-R5 create nothing, so `pending` is emptied.
-        closed = _closed_without_running(pending, ABANDONED, history)
-        outcome.state_delta = {**closed, **outcome.state_delta}
-        return outcome
+        steps = pending["steps"]
+        return _change_of_intention(pending, steps, operations, turn_input, history, "other_tool")
     if same_tool:
         steps, merges = _merge_steps(pending, operations, turn_input.message)
         return _after_merge(pending, steps, merges, now, route="same_tool")
@@ -233,7 +263,7 @@ def _pending_gate(
         steps, merges = _merge_steps(pending, operations, turn_input.message)
         return _after_merge(pending, steps, merges, now, route="reject_merged")
     if act in (Act.REJECT, Act.CANCEL):
-        closed = _closed_without_running(pending, CANCELLED, history)
+        closed = _closed_without_running(pending, CANCELLED, pending["steps"], history)
         return TurnOutcome(_discarded_line(pending), state_delta=closed, route="cancelled")
     # `question` or `other`: answer what the agent can do, then repeat what is pending.
     outcome = _repeat_pending(pending, [], now, route="pending_template")
@@ -241,10 +271,31 @@ def _pending_gate(
     return outcome
 
 
-def _closed_without_running(pending: dict, status: str, history: Sequence[dict]) -> dict:
-    """The state delta of a record closed without running: `pending` emptied and the record in
-    `history` with its steps as they were (D6; decision A of brief 12)."""
-    entry = closed_entry(pending, status, pending["steps"])
+def _change_of_intention(
+    pending: dict,
+    steps: list[dict],
+    operations: list[dict],
+    turn_input: TurnInput,
+    history: Sequence[dict],
+    route: str,
+) -> TurnOutcome:
+    """D3.1 (*Otra tool*, clarification rule 4): `pending` to `history` as `abandoned` with
+    `steps`, then the rules table on the whole turn, nothing inherited, after the D64 line."""
+    outcome = _rules_table(operations, turn_input)
+    outcome.route = f"{route}:{outcome.route}"
+    outcome.reply = f"{_discarded_line(pending)}\n{outcome.reply}"
+    # R2, R4 and R5 write the new record; R3 creates nothing, so `pending` is emptied.
+    closed = _closed_without_running(pending, ABANDONED, steps, history)
+    outcome.state_delta = {**closed, **outcome.state_delta}
+    return outcome
+
+
+def _closed_without_running(
+    pending: dict, status: str, steps: list[dict], history: Sequence[dict]
+) -> dict:
+    """`pending` emptied and the record in `history` with `steps` as they were: its own, or a
+    clarification's candidates as `{tool, args}` (D6, D65). Nothing ran."""
+    entry = closed_entry(pending, status, steps)
     return {"pending": None, "history": appended(history, entry)}
 
 
@@ -256,8 +307,7 @@ def _is_same_tool(pending: dict | None, act: Act, operations: list[dict]) -> boo
     """D3 gate, step 3, *Misma tool*: a `collecting` or `awaiting_confirmation` record, `act`
     `request_action` or `provide_info`, and every operation of a pending tool (none counts too).
 
-    A clarification (`awaiting_clarification`, task 13) is not *Misma tool*, so its candidates
-    are not pending tools here (D11.1, pending (c)).
+    A clarification is not *Misma tool*: its candidates are not pending tools (D54 (c)).
     """
     return (
         bool(pending)
@@ -267,29 +317,6 @@ def _is_same_tool(pending: dict | None, act: Act, operations: list[dict]) -> boo
     )
 
 
-def _join_split_operations(operations: list[dict]) -> list[dict]:
-    """D11.1: join the operations of one tool into one when their args share no key.
-
-    Keys are counted after the registry filter and without absent values (D4 rule 2), so a
-    `""` in one operation never overwrites a value of another. Each `_add`/`_remove` bucket is
-    its own key. The whole group of a tool is joined, or none of it: a repeated key or a
-    different `depends_on` (None included, D35) leaves the group as it came, and D11 asks.
-    The joined operation keeps the first one's `certainty`, which *Misma tool* ignores (D2).
-    """
-    result = []
-    for tool in dict.fromkeys(operation["tool"] for operation in operations):
-        group = [operation for operation in operations if operation["tool"] == tool]
-        args_list = [drop_absent(operation["args"]) for operation in group]
-        keys = [key for args in args_list for key in args]
-        same_dependency = len({operation["depends_on"] for operation in group}) == 1
-        if len(group) == 1 or len(set(keys)) < len(keys) or not same_dependency:
-            result += group
-            continue
-        joined_args = {key: value for args in args_list for key, value in args.items()}
-        result.append({**group[0], "args": joined_args})
-    return result
-
-
 def _rules_table(operations: list[dict], turn_input: TurnInput) -> TurnOutcome:
     explicit = [op for op in operations if op["certainty"] == Certainty.EXPLICIT]
     plausible = [op for op in operations if op["certainty"] == Certainty.PLAUSIBLE]
@@ -297,29 +324,37 @@ def _rules_table(operations: list[dict], turn_input: TurnInput) -> TurnOutcome:
     if not operations:
         return TurnOutcome(replies.capabilities(), route="R1")
     if len(explicit) == 1 and not plausible:
-        return _start_flow(explicit[0], turn_input)
+        operation = explicit[0]
+        return _start_flow(TOOLS[operation["tool"]], {}, operation["args"], turn_input, "R2")
     if len(explicit) >= 2 and not plausible:
-        route = "R3"
-    elif explicit:
-        route = "R4"
-    else:
-        route = "R5"
-    return TurnOutcome(replies.ONE_OPERATION_AT_A_TIME, route=route)
+        return TurnOutcome(replies.ONE_OPERATION_AT_A_TIME, route="R3")
+    # R4, R5: store the candidates; ask, after D4 rule 9's line if a name was dropped (D3).
+    route = "R4" if explicit else "R5"
+    record, changes, rejected = clarification.new_record(operations, turn_input.message)
+    if record is None:  # four or more candidates: D3 answers the capabilities (unreachable)
+        return TurnOutcome(replies.capabilities(), route=route)
+    lines = [replies.REJECTED_NAME_LINE] if rejected else []
+    reply = "\n".join([*lines, record["last_question"]])
+    return TurnOutcome(reply, {"pending": record}, route, changes, rejected)
 
 
-def _start_flow(operation: dict, turn_input: TurnInput) -> TurnOutcome:
-    """R2: anchor and merge against an empty record, then ask for what is missing or confirm.
-
-    `args` keeps the user's words unvalidated (D4 rule 7) and only contract fields (D4 rule
-    10). A record is always a list of steps: one operation is a one-step plan (D18). Its
-    `operation_id` is born here and the log reads it.
-    """
-    tool = TOOLS[operation["tool"]]
-    merged = merge_args(tool, {}, operation["args"], turn_input.message)
+def _start_flow(
+    tool: ToolSpec,
+    stored: dict,
+    incoming: dict,
+    turn_input: TurnInput,
+    route: str,
+    operation_id: str | None = None,
+) -> TurnOutcome:
+    """A one-step record (D18): `incoming` anchored and merged into `stored` (D4), then the
+    question or the confirmation. R2 starts from nothing with a new `operation_id`;
+    clarification rules 2 and 3 start from the candidate's args (never anchored again) and keep
+    the clarification's `operation_id`."""
+    merged = merge_args(tool, stored, incoming, turn_input.message)
     steps = [{"tool": tool.name, "args": merged.args}]
-    record = {"operation_id": uuid4().hex, "tools": [tool.name], "steps": steps}
+    record = {"operation_id": operation_id or uuid4().hex, "tools": [tool.name], "steps": steps}
     record.update(_assessment(steps, turn_input.now))
-    return _pending_outcome(record, [(tool, merged)], turn_input.now, route="R2")
+    return _pending_outcome(record, [(tool, merged)], turn_input.now, route=route)
 
 
 def _merge_steps(
@@ -563,37 +598,3 @@ def _pending_outcome(
         rejected=rejected,
         invalid=invalid,
     )
-
-
-def filter_by_registry(interpretation: TurnInterpretation) -> list[dict]:
-    """D3 step 1 and D2's contract filter, as plain dicts.
-
-    Operations of a tool not in `TOOLS` are dropped (D10). The rest keep only the keys of
-    their tool (its field names and, for a `person_list` field, its `_add`/`_remove` buckets)
-    and their `depends_on` (None when the model gave none), which tasks 08b and 14a read.
-    """
-    kept = []
-    for operation in interpretation.operations:
-        tool = TOOLS.get(operation.tool)
-        if tool is None:
-            continue
-        keys = _contract_keys(tool)
-        args = operation.args.model_dump(exclude_none=True)
-        kept.append(
-            {
-                "tool": tool.name,
-                "certainty": operation.certainty,
-                "depends_on": operation.depends_on,
-                "args": {name: value for name, value in args.items() if name in keys},
-            }
-        )
-    return kept
-
-
-def _contract_keys(tool: ToolSpec) -> set[str]:
-    keys = set()
-    for spec in tool.fields:
-        keys.add(spec.name)
-        if spec.kind == FieldKind.PERSON_LIST:
-            keys.update(list_buckets(spec))
-    return keys

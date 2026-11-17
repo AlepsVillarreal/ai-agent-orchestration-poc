@@ -6,7 +6,8 @@ is structured state, not conversation (TASK.md line 229): no rule reads it, neit
 (D4) nor the gate (D3), and the interpreter never sees it (`pending_summary` reads only
 `pending`; D2, D14). Every closing writes its entry with these helpers: a confirmed record
 closes `completed`, `failed` or `uncertain` (D9.2, D9.3); a record closed without running
-closes `cancelled` (a "no" or a "cancel", D7.3) or `abandoned` (a change of intention, D3.1).
+closes `cancelled` (a "no" or a "cancel", D7.3 and D3 rule 1) or `abandoned` (a change of
+intention, D3.1).
 A closing without running keeps the steps as they were in `pending`, `{tool, args}`: the user's
 words after the merge, neither normalized nor validated, and no `outcome`, `values` or
 `result`, because no tool received anything.
@@ -27,7 +28,7 @@ REUSED = "reused"  # the same execution was already done: the stored result, not
 DONE_OUTCOMES = (RAN, REUSED)
 
 # Final status of a record closed without running anything (D6, D7.3, D3.1).
-CANCELLED = "cancelled"  # a "no" without arguments, or a "cancel"
+CANCELLED = "cancelled"  # a "no" without arguments, or a "cancel" (also to a clarification)
 ABANDONED = "abandoned"  # a change of intention: the turn asked for a tool that was not pending
 
 
@@ -57,7 +58,8 @@ def closed_entry(record: dict, status: str, steps: list[dict[str, Any]]) -> dict
 
     After a "yes", `steps` lists the steps that were tried, in step order, as `step_entry`
     writes them. Closed without running (`cancelled`, `abandoned`), it is the record's own
-    `steps`, `{tool, args}`.
+    `steps`, `{tool, args}`; a clarification, which has no steps, keeps its candidates in their
+    order as `{tool, args}`, steps never started (without `depends_on`, not an argument).
     """
     return {"operation_id": record["operation_id"], "status": status, "steps": steps}
 

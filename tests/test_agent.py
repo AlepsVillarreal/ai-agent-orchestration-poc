@@ -870,3 +870,99 @@ async def test_cancel_through_the_node(monkeypatch, caplog):
     assert calls["send_notification"] == []
     assert all(not args for args in calls.values())
     assert fake.calls == 3
+
+
+# Brief 13 -------------------------------------------------------------------------------------
+
+
+# 18 (case C, TASK.md lines 338-355, 282-284 and 436): the clarification is stored and asked;
+# "solo avísale" starts the notification with what C1 said; "por correo" completes it; the
+# "yes" runs only the notification. The log ties the first two turns to the same operation.
+async def test_case_c_through_the_node(monkeypatch, caplog):
+    calls = record_tools(monkeypatch)
+    results = record_results(monkeypatch)
+    caplog.set_level(logging.INFO, logger="assistant")
+    by_mail = {
+        "act": "provide_info",
+        "operations": [
+            {"tool": "send_notification", "certainty": "explicit", "args": {"channel": "correo"}}
+        ],
+    }
+    script = [FIXED["C1"].interpretation, FIXED["K2"].interpretation, by_mail]
+    script.append(FIXED["G2"].interpretation)
+    fake = ScriptedLlm(script=[json.dumps(item) for item in script])
+    runner, sessions = make_runner(fake)
+    messages = [FIXED["C1"].message, FIXED["K2"].message, "Por correo", FIXED["G2"].message]
+
+    answers, lines, records = [], [], []
+    for message in messages:
+        caplog.clear()
+        answers.append(event_text(reply_events(await run_turn(runner, USER, "s-cc", message))[0]))
+        [line] = _turn_records(caplog)
+        lines.append(line)
+        session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-cc")
+        records.append(session.state.get("pending"))
+
+    assert fake.calls == 4
+    clarification, notice, ready, closed = records
+    assert answers[0] == "¿Quieres enviar una notificación, programar una reunión, o ambas?"
+    assert clarification["status"] == "awaiting_clarification"
+    assert [c["tool"] for c in clarification["candidates"]] == [
+        "send_notification",
+        "schedule_meeting",
+    ]
+    assert answers[1].split("\n")[:2] == [
+        "Anoté a quién se envía: Carlos.",
+        "Anoté el mensaje: mañana revisamos el servidor.",
+    ]
+    assert answers[1].endswith(notice["last_question"])
+    assert notice["missing"] == ["channel"]
+    assert ready["status"] == "awaiting_confirmation"
+    assert answers[2].endswith(ready["last_question"])
+    assert closed is None
+    [result] = results["send_notification"]
+    assert answers[3] == f"Listo: envié la notificación {result['notification_id']}."
+    assert calls["send_notification"] == [
+        {"recipient": "Carlos", "message": "mañana revisamos el servidor", "channel": "email"}
+    ]
+    assert calls["schedule_meeting"] == [] and calls["create_ticket"] == []
+
+    operation = clarification["operation_id"]
+    assert notice["operation_id"] == operation
+    routes = ["route=R4 ", "route=clarification:regla_2 ", "route=same_tool ", "route=confirmed "]
+    for line, route in zip(lines, routes, strict=True):
+        assert route in line, line
+    assert f"op={operation}" in lines[0] and f"op={operation}" in lines[1]
+
+
+# 19 (D3 rule 1, TASK.md line 284): a "no" to the clarification discards it; a later "yes" finds
+# nothing to run.
+async def test_clarification_cancel_through_the_node(monkeypatch):
+    calls = record_tools(monkeypatch)
+    script = [FIXED[key].interpretation for key in ("C1", "S2", "G2")]
+    fake = ScriptedLlm(script=[json.dumps(item) for item in script])
+    runner, sessions = make_runner(fake)
+
+    await run_turn(runner, USER, "s-cx", FIXED["C1"].message)
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-cx")
+    clarification = session.state["pending"]
+    second = await run_turn(runner, USER, "s-cx", FIXED["S2"].message)
+
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-cx")
+    assert session.state["pending"] is None
+    [entry] = session.state["history"]
+    assert entry == {
+        "operation_id": clarification["operation_id"],
+        "status": "cancelled",
+        "steps": [{"tool": c["tool"], "args": c["args"]} for c in clarification["candidates"]],
+    }
+    assert len(entry["steps"]) == 2
+    assert event_text(reply_events(second)[0]) == (
+        "No inicié ninguna acción. Dime qué necesitas cuando quieras."
+    )
+
+    third = await run_turn(runner, USER, "s-cx", FIXED["G2"].message)
+
+    assert event_text(reply_events(third)[0]) == replies.NO_PENDING_OPERATION
+    assert all(not args for args in calls.values())
+    assert fake.calls == 3

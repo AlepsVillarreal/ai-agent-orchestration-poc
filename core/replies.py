@@ -21,11 +21,11 @@ ONE_PER_TOOL = "Puedo hacer una operación de cada tipo por mensaje; ¿por cuál
 # D3 gate, step 4: a confirmation, rejection or bare data with nothing pending (TASK.md line 284).
 NO_PENDING_OPERATION = "No hay ninguna operación pendiente."
 
-# Provisional: a pending clarification (`awaiting_clarification`, D3 gate step 2; task 13
-# replaces it).
-PENDING_NOT_SUPPORTED_YET = "Todavía no puedo continuar esa operación en esta versión."
+# D3, *Lectura de la respuesta*, rule 1: a "no" or a "cancel" to a clarification. Nothing had
+# started, so it is not the discard line of D66 ("No voy a…").
+NO_ACTION_STARTED = "No inicié ninguna acción. Dime qué necesitas cuando quieras."
 
-# Provisional: rules R3, R4 and R5 (tasks 13 and 14a replace it).
+# Provisional: R3, and a clarification resolved to two or more tools (task 14a replaces it).
 ONE_OPERATION_AT_A_TIME = "Por ahora puedo atender una operación a la vez; ¿cuál necesitas primero?"
 
 # D1.1 *Fallos* and D2: the interpreter's output was broken, outside the schema or empty.
@@ -72,6 +72,37 @@ def discarded_line(tools: list[ToolSpec]) -> str:
     """
     actions = join_es([tool.action_phrase for tool in tools], "ni")
     return f"No voy a {actions}; descarté lo que tenía pendiente."
+
+
+def clarification_question(tools: list[ToolSpec]) -> str | None:
+    """D3, *Pregunta*: the clarification question by number of candidates, from the registry.
+
+    Every candidate is listed, the `explicit` one too: a yes/no on the `plausible` one alone
+    could not say "only the other". None with four or more candidates, which D3 never asks
+    about (unreachable with three tools). It carries no value, so it is stored as
+    `last_question` (D2, D14), and it never reads the model's reason for the ambiguity.
+    """
+    actions = [tool.action_phrase for tool in tools]
+    if len(actions) == 1:
+        return f"¿Quieres {actions[0]}? Responde sí o no."
+    if len(actions) == 2:
+        return f"¿Quieres {actions[0]}, {actions[1]}, o ambas?"
+    if len(actions) == 3:
+        return f"¿Qué necesitas: {join_es(actions, 'o')}? Puedes elegir varias."
+    return None
+
+
+def inherited_lines(tool: ToolSpec, args: dict[str, Any]) -> list[str]:
+    """D4 rule 9: a flow born from a clarification lists every value it inherited.
+
+    One line per stored field, in registry order, written like a `fill` (D39), so the user sees
+    what the chosen candidate already had before the lines of the turn that chose it.
+    """
+    return [
+        change_line(spec, Change(spec.name, "fill", None, args[spec.name]))
+        for spec in tool.fields
+        if spec.name in args
+    ]
 
 
 def missing_question(tool: ToolSpec, fields: list[str]) -> str:

@@ -1,4 +1,7 @@
-"""The judge of task 10c (`tests/case_c_judge.py`) on fixed and saved outputs: no model call."""
+"""The judge of task 10c (`tests/case_c_judge.py`) on fixed and saved outputs: no model call.
+
+Since task 13 the judge reads `S3` with the core's own clarification (no copy of D3's rules).
+"""
 
 import copy
 import json
@@ -212,6 +215,26 @@ EDGES = {
         False,
     ),
     "S3 reject without operations": ("S3", {"act": "reject", "operations": []}, "regla_1", False),
+    # Note (nnn), task 13: one case per loose act of D3's reading, now read by the core.
+    "S3 cancel without operations": ("S3", {"act": "cancel", "operations": []}, "regla_1", False),
+    "S3 reject with a ticket explicit": (
+        "S3",
+        {"act": "reject", "operations": [_op("create_ticket")]},
+        "regla_4",
+        False,
+    ),
+    "S3 provide_info with a ticket explicit": (
+        "S3",
+        {"act": "provide_info", "operations": [_op("create_ticket")]},
+        "regla_4",
+        False,
+    ),
+    "S3 provide_info with the notice explicit": (
+        "S3",
+        {"act": "provide_info", "operations": [_op("send_notification")]},
+        "regla_2",
+        False,
+    ),
 }
 
 

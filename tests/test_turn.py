@@ -164,7 +164,8 @@ def test_nothing_pending_acts():
             assert outcome.state_delta == {}
 
 
-# 9
+# 9. Task 13: R4 and R5 store a clarification (no `steps`, so no flow starts); R3 still creates
+# nothing until task 14a. The clarification itself is in test_clarification.py.
 def test_r3_r4_r5_do_not_start_anything_yet():
     only_plausible = interpretation(
         "request_action", op("schedule_meeting", "plausible", attendees=["Carlos"])
@@ -177,7 +178,13 @@ def test_r3_r4_r5_do_not_start_anything_yet():
     for turn, message, route in turns:
         outcome = handle_turn(None, turn, TurnInput(message, NOW, SESSION))
         assert outcome.route == route
-        assert outcome.state_delta == {}
+        if route == "R3":
+            assert outcome.state_delta == {}
+            continue
+        assert list(outcome.state_delta) == ["pending"]
+        record = outcome.state_delta["pending"]
+        assert record["status"] == "awaiting_clarification"
+        assert "steps" not in record
 
 
 # 10
@@ -281,8 +288,8 @@ def test_no_turn_executes_a_tool(monkeypatch):
 
 
 # 16, rewritten in task 12: with a `collecting` record nothing is provisional any more. Q1 is
-# decision D of brief 12 (state unchanged) and F2 with F1 pending is *Otra tool*, case F. Only a
-# clarification stays provisional (test_clarification_stays_provisional, task 13). ("A1", "G2")
+# decision D of brief 12 (state unchanged) and F2 with F1 pending is *Otra tool*, case F. The
+# clarification is read since task 13 (test_clarification.py). ("A1", "G2")
 # left in task 10a: a "yes" while collecting repeats the question (test_yes_while_collecting_...).
 @pytest.mark.parametrize(
     ("first", "key", "route", "keeps_state"),
@@ -565,17 +572,13 @@ def test_case_d_reply_names_every_component():
 
 
 # Review note 4: *Misma tool* applies only to a `collecting` record and, since task 10a, to one
-# awaiting confirmation (test_correction_while_awaiting); the clarification is task 13.
+# awaiting confirmation (test_correction_while_awaiting). Task 13: a clarification reads `K2` as
+# its answer (rule 2, where `certainty` counts), never as *Misma tool*.
 def test_same_tool_needs_a_collecting_record():
-    clarifying = {
-        "tools": ["send_notification", "schedule_meeting"],
-        "status": "awaiting_clarification",
-        "missing": [],
-        "last_question": "¿Quieres enviar una notificación, programar una reunión, o ambas?",
-    }  # like phase0's literal record: candidates, no `steps`
+    clarifying = handle_fixed(None, "C1").state_delta["pending"]
     outcome = handle_fixed(clarifying, "K2")
-    assert outcome.route == "pending_provisional"
-    assert outcome.state_delta == {}
+    assert outcome.route == "clarification:regla_2"
+    assert outcome.state_delta["pending"]["status"] == "collecting"
 
 
 # Brief 09a ------------------------------------------------------------------------------------
@@ -1173,11 +1176,13 @@ def test_history_keeps_the_last_ten(monkeypatch, before, after):
 
 
 # 5 (D6): only a closing writes `history`. No fixed turn runs a tool here; since task 12 a change
-# of intention (`abandoned`) and a "no" (`cancelled`) close the pending record without running.
+# of intention (`abandoned`) and a "no" (`cancelled`) close the pending record without running,
+# and since task 13 so do rules 4 and 1 of a clarification (the record of `C1`).
 def test_only_a_closing_writes_history():
     history = old_entries(2)
     outcomes = []
-    for pending in (None, a1_pending()):
+    clarifying = handle_fixed(None, "C1").state_delta["pending"]
+    for pending in (None, a1_pending(), clarifying):
         outcomes += [
             handle_turn(
                 pending, fixed(key), TurnInput(FIXED[key].message, NOW, SESSION), history=history
@@ -1192,18 +1197,33 @@ def test_only_a_closing_writes_history():
         pending = outcome.state_delta.get("pending", pending)
         outcomes.append(outcome)
 
-    closings = {"cancelled": "cancelled", "other_tool": "abandoned"}
+    closings = {
+        "cancelled": "cancelled",
+        "other_tool": "abandoned",
+        "clarification:regla_1": "cancelled",
+        "clarification:regla_4": "abandoned",
+    }
     for outcome in outcomes:
         assert outcome.route != "confirmed"
         assert outcome.results == []
-        status = closings.get(outcome.route.split(":")[0])
+        route = outcome.route
+        status = closings.get(route.split(":")[0]) or closings.get(":".join(route.split(":")[:2]))
         if status is None:
             assert "history" not in outcome.state_delta, outcome.route
             continue
         new = outcome.state_delta["history"]
         assert new[:-1] == history and new[-1]["status"] == status, outcome.route
-        assert outcome.state_delta["pending"] is None or outcome.route == "other_tool:R2"
-    assert {o.route for o in outcomes} >= {"cancelled", "other_tool:R2", "other_tool:R4"}
+        # Only R3 creates nothing after a change of intention (task 14a).
+        assert (outcome.state_delta["pending"] is None) == route.endswith(
+            ("cancelled", "regla_1", ":R3")
+        ), route
+    assert {o.route for o in outcomes} >= {
+        "cancelled",
+        "other_tool:R2",
+        "other_tool:R4",
+        "clarification:regla_1",
+        "clarification:regla_4:R2",
+    }
 
 
 # Brief 08b ------------------------------------------------------------------------------------
@@ -1360,7 +1380,7 @@ def _mixed_turn(certainty: str) -> TurnInterpretation:
 
 
 # 5 (D11.1 only in *Misma tool*: "dos tickets pedidos no se vuelven uno"; should-fix 1 of
-# 06-round-3). Joined outside the branch, (i) would give `pending_provisional`, (ii) `R2` and
+# 06-round-3). Joined outside the branch, (i) would give `other_tool:R3`, (ii) `R2` and
 # (iv) `confirm_merged`.
 @pytest.mark.parametrize(
     ("pending_key", "turn", "message"),
@@ -2061,15 +2081,8 @@ _NEW_MEETING = op("schedule_meeting", attendees=["Juan"])
             "other_tool:R3",
             replies.ONE_OPERATION_AT_A_TIME,
         ),
-        (
-            "A1",
-            interpretation(
-                "request_action", _NEW_MEETING, op("create_ticket", "plausible", title="Caída")
-            ),
-            "Mejor agenda una reunión con Juan y quizá un ticket titulado Caída",
-            "other_tool:R4",
-            replies.ONE_OPERATION_AT_A_TIME,
-        ),
+        # The `other_tool:R4` case left in task 13: R4 now stores a clarification with the new
+        # candidates (test_change_of_intention_into_r4_keeps_the_new_candidates).
         # Review 12-1, should-fix 2 (D3.1): with `reject` or `cancel`, the operations of the
         # pending tool go to the table too, so two `explicit` are R3, not the new ticket alone.
         (
@@ -2103,7 +2116,7 @@ def test_reject_or_cancel_with_another_tool_is_a_change_of_intention(
     if reply_end is None:  # R2: the new ticket, with nothing of the meeting
         record = outcome.state_delta["pending"]
         assert record["steps"] == [{"tool": "create_ticket", "args": _NEW_TICKET["args"]}]
-    else:  # R3/R4 create nothing yet (task 14a): the pending record is gone all the same
+    else:  # R3 creates nothing yet (task 14a): the pending record is gone all the same
         assert outcome.state_delta["pending"] is None
         assert outcome.reply == f"{discarded}\n{reply_end}"
     assert nothing_ran(calls)
@@ -2240,6 +2253,8 @@ _PLAIN_NO = [
         interpretation("reject", op("send_notification", "plausible", recipient="Carlos")),
         "No, quizá avísale a Carlos",
     ),
+    # Note (A11): a "no" whose arguments are all absent has no arguments (D69, "sin ausentes").
+    (interpretation("reject", op("create_ticket", priority="", assignee=None)), "No"),
 ]
 
 
@@ -2399,43 +2414,27 @@ def test_d10_line_before_every_new_pending_branch(first, turn, message, route):
     assert without_new_id(pizza.state_delta) == without_new_id(plain.state_delta)
 
 
-# 10 (D3 step 2): a clarification is still provisional (task 13), whatever comes
-_CLARIFYING = {
-    "tools": ["send_notification", "schedule_meeting"],
-    "status": "awaiting_clarification",
-    "missing": [],
-    "last_question": "¿Quieres enviar una notificación, programar una reunión, o ambas?",
-}  # the literal record of test_same_tool_needs_a_collecting_record
-
-
+# 11 (D6): a closing without running also keeps only the last ten. Task 13 adds a clarification
+# discarded by rule 1, archived with its candidates as `{tool, args}`.
 @pytest.mark.parametrize(
-    ("turn", "message"),
-    [(fixed("F2"), FIXED["F2"].message), (interpretation("cancel"), "Mejor cancela")],
-)
-def test_clarification_stays_provisional(turn, message):
-    outcome = handle(dict(_CLARIFYING), turn, message)
-
-    assert outcome.route == "pending_provisional"
-    assert outcome.reply == replies.PENDING_NOT_SUPPORTED_YET
-    assert outcome.state_delta == {}
-
-
-# 11 (D6): a closing without running also keeps only the last ten
-@pytest.mark.parametrize(
-    ("turn", "message", "status"),
+    ("first", "turn", "message", "status"),
     [
-        (f2_as("request_action"), FIXED["F2"].message, "abandoned"),
-        (interpretation("cancel"), "Cancela", "cancelled"),
+        ("F1", f2_as("request_action"), FIXED["F2"].message, "abandoned"),
+        ("F1", interpretation("cancel"), "Cancela", "cancelled"),
+        ("C1", fixed("S2"), FIXED["S2"].message, "cancelled"),
     ],
 )
-def test_closing_without_running_keeps_the_last_ten(turn, message, status):
+def test_closing_without_running_keeps_the_last_ten(first, turn, message, status):
     history = old_entries(10)
     received = json.loads(json.dumps(history))
-    pending = f1_pending()
+    pending = handle_fixed(None, first).state_delta["pending"]
 
     new = handle(pending, turn, message, history=history).state_delta["history"]
 
     assert len(new) == 10
-    assert new[-1] == closed(pending, status)
+    steps = pending.get("steps") or [
+        {"tool": c["tool"], "args": c["args"]} for c in pending["candidates"]
+    ]
+    assert new[-1] == {"operation_id": pending["operation_id"], "status": status, "steps": steps}
     assert new[:-1] == received[1:]
     assert history == received
