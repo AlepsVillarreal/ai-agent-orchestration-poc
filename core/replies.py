@@ -21,7 +21,8 @@ ONE_PER_TOOL = "Puedo hacer una operación de cada tipo por mensaje; ¿por cuál
 # D3 gate, step 4: a confirmation, rejection or bare data with nothing pending (TASK.md line 284).
 NO_PENDING_OPERATION = "No hay ninguna operación pendiente."
 
-# Provisional: steps 2 and 3 of the D3 gate that are not built yet (tasks 12 and 13 replace it).
+# Provisional: a pending clarification (`awaiting_clarification`, D3 gate step 2; task 13
+# replaces it).
 PENDING_NOT_SUPPORTED_YET = "Todavía no puedo continuar esa operación en esta versión."
 
 # Provisional: rules R3, R4 and R5 (tasks 13 and 14a replace it).
@@ -52,10 +53,25 @@ def join_es(items: list[str], last_word: str = "y") -> str:
     return f"{', '.join(items[:-1])} {last_word} {items[-1]}"
 
 
-def capabilities() -> str:
-    """R1 and the reply to `question`/`other`: what the agent can do, from the registry."""
+def capabilities(ask: bool = True) -> str:
+    """R1 and the reply to `question`/`other`: what the agent can do, from the registry.
+
+    `ask=False` drops the closing "¿Qué necesitas?": with something pending, the reply goes on
+    with what is pending instead of inviting a new request that would abandon it.
+    """
     actions = join_es([tool.action_phrase for tool in TOOLS.values()], "o")
-    return f"Puedo ayudarte a {actions}. ¿Qué necesitas?"
+    sentence = f"Puedo ayudarte a {actions}."
+    return f"{sentence} ¿Qué necesitas?" if ask else sentence
+
+
+def discarded_line(tools: list[ToolSpec]) -> str:
+    """D7.3 and D3.1: what was pending was discarded without running, named by its actions.
+
+    Used alone after a "cancel" or a plain "no", and before the new flow's reply after a change
+    of intention. No values and no "Listo" (the word of a result, D48).
+    """
+    actions = join_es([tool.action_phrase for tool in tools], "ni")
+    return f"No voy a {actions}; descarté lo que tenía pendiente."
 
 
 def missing_question(tool: ToolSpec, fields: list[str]) -> str:

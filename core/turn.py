@@ -17,10 +17,10 @@ Order of a turn (D3, *Compuerta de entrada*):
    the merge like any single operation. Nothing pending, another tool in the turn or `confirm`:
    D11 as written, so outside *Misma tool* two requested tickets never become one (inside it,
    two tickets with disjoint keys join into the pending one, D54).
-3. Something pending, in `collecting` or `awaiting_confirmation`:
+3. Something pending, in `collecting` or `awaiting_confirmation` (`awaiting_clarification` keeps
+   a provisional template until task 13). S = tools with `explicit` operations. In this order:
    - `confirm` -> `_confirm`, in this order: (1) an operation of another tool, or something
-     the filter dropped -> repeat what is pending (author's answer to brief 10a, option (a)),
-     assessed again against `now` like a turn without changes (autodecided AT);
+     the filter dropped -> repeat what is pending (author's answer to brief 10a, option (a));
      (2) `confirms_tool` naming a tool that is not pending -> the same (D7.4); (3) operations of
      the pending tool go through the merge first, and a change, a rejected name or a note never
      runs (what D4 requires of D7); (4) still `collecting` -> repeat the question (D7.1);
@@ -29,15 +29,23 @@ Order of a turn (D3, *Compuerta de entrada*):
      (6) `_run_confirmed` runs each step under its idempotency key (D9.1-D9.3), stops at the
      first step that does not end done, empties `pending`, answers with one line per step
      tried and appends the record to `history` as completed, failed or uncertain.
+   - *Otra tool* (D3.1): S has a tool that is not pending and `act` is `request_action`,
+     `provide_info`, `reject` or `cancel` -> the record goes to `history` as `abandoned` and the
+     rules table runs on every operation of the turn against nothing stored, after the discard
+     line (author's answer B to brief 12). A `confirm` with another tool is D45, not this.
    - *Misma tool*: `act` is `request_action` or `provide_info` and every operation is of a
      pending tool (none at all counts too) -> each operation is anchored and merged into the
      step of its tool (D4, D18); `certainty` is ignored (D2). The reply shows every change,
-     every note and the fixed rejected-name line, then the question or the confirmation. A
-     merge that changes nothing repeats them with the state unchanged (D9 *Caso H*, D40),
-     unless the steps assessed again against `now` give another result (a time that passed
-     while the record waited): then the reassessed record is written. Nothing runs.
-   - Anything else (and any other status) -> provisional template, state unchanged (tasks 12
-     and 13).
+     every note and the fixed rejected-name line, then the question or the confirmation.
+   - *Solo `plausible` de otra tool* (`request_action`/`provide_info` left) -> nothing of the
+     message is applied, not even data of the pending tool; what is pending is repeated (D3).
+   - `reject` with an argument of a pending tool -> a correction merged like *Misma tool*
+     (D7.3); `reject` without one, or `cancel` -> `pending` emptied, the record to `history`
+     as `cancelled` and the discard line as the reply.
+   - `question`/`other` -> what the agent can do, without its question, then what is pending.
+   A turn that repeats what is pending (a merge without changes, (1), (2), (4), *Solo
+   `plausible`*, `question`/`other`) assesses it again against `now` and writes it only if its
+   validity changed with time (D9 *Caso H*, D40, D57). Only `confirm` runs anything.
 4. Nothing pending -> route by `act`; a request goes to the rules table (R1-R5), which counts
    operations by certainty and never looks at tool names (TASK.md line 562). R2 anchors and
    merges against an empty record (D4 rule 4), so a name not written in the message never
@@ -78,7 +86,15 @@ from core.executions import (
     from_stored,
     settled,
 )
-from core.history import DONE_OUTCOMES, UNCERTAIN, appended, closed_entry, closed_status
+from core.history import (
+    ABANDONED,
+    CANCELLED,
+    DONE_OUTCOMES,
+    UNCERTAIN,
+    appended,
+    closed_entry,
+    closed_status,
+)
 from core.interpretation import Act, Certainty, TurnInterpretation
 from core.merge import Change, MergeResult, Rejected, merge_args
 from core.presence import drop_absent
@@ -165,16 +181,12 @@ def _decide(
         return TurnOutcome(replies.ONE_PER_TOOL, route="d11")
 
     if pending:
-        # D3 gate, step 3: `confirm` and *Misma tool*; *Otra tool*, `reject`, `cancel`,
-        # `question`, `other` and the clarification are tasks 12 and 13.
-        if pending.get("status") in (COLLECTING, AWAITING_CONFIRMATION):
-            if act == Act.CONFIRM:
-                outcome = _confirm(pending, operations, turn_input, confirms_tool, dropped_some)
-                return outcome or _run_confirmed(pending, turn_input, history, executions)
-            if same_tool:
-                steps, merges = _merge_steps(pending, operations, turn_input.message)
-                return _after_merge(pending, steps, merges, turn_input.now, route="same_tool")
-        return TurnOutcome(replies.PENDING_NOT_SUPPORTED_YET, route="pending_provisional")
+        if pending.get("status") not in (COLLECTING, AWAITING_CONFIRMATION):  # D3 step 2
+            return TurnOutcome(replies.PENDING_NOT_SUPPORTED_YET, route="pending_provisional")
+        if act == Act.CONFIRM:
+            outcome = _confirm(pending, operations, turn_input, confirms_tool, dropped_some)
+            return outcome or _run_confirmed(pending, turn_input, history, executions)
+        return _pending_gate(pending, act, operations, turn_input, history, same_tool)
 
     # D3 gate, step 4: nothing is pending.
     if act in (Act.CONFIRM, Act.REJECT, Act.CANCEL) or (act == Act.PROVIDE_INFO and not operations):
@@ -183,6 +195,61 @@ def _decide(
         return TurnOutcome(replies.capabilities(), route="template")
     # `request_action`, or `provide_info` with operations, which is treated the same.
     return _rules_table(operations, turn_input)
+
+
+def _pending_gate(
+    pending: dict,
+    act: Act,
+    operations: list[dict],
+    turn_input: TurnInput,
+    history: Sequence[dict],
+    same_tool: bool,
+) -> TurnOutcome:
+    """D3 gate, step 3, for every `act` but `confirm`, in the order of the module docstring.
+
+    It decides by counts and by the names of the pending tools, never by the message text.
+    """
+    now = turn_input.now
+    other_tool = any(
+        op["certainty"] == Certainty.EXPLICIT and op["tool"] not in pending["tools"]
+        for op in operations
+    )
+    if other_tool and act in (Act.REQUEST_ACTION, Act.PROVIDE_INFO, Act.REJECT, Act.CANCEL):
+        outcome = _rules_table(operations, turn_input)  # D3.1: nothing stored is inherited
+        outcome.route = f"other_tool:{outcome.route}"
+        outcome.reply = f"{_discarded_line(pending)}\n{outcome.reply}"
+        # R2 writes the new record; R3-R5 create nothing, so `pending` is emptied.
+        closed = _closed_without_running(pending, ABANDONED, history)
+        outcome.state_delta = {**closed, **outcome.state_delta}
+        return outcome
+    if same_tool:
+        steps, merges = _merge_steps(pending, operations, turn_input.message)
+        return _after_merge(pending, steps, merges, now, route="same_tool")
+    if act in (Act.REQUEST_ACTION, Act.PROVIDE_INFO):  # only `plausible` of another tool
+        return _repeat_pending(pending, [], now, route="plausible_other_tool")
+    if act == Act.REJECT and any(
+        op["tool"] in pending["tools"] and drop_absent(op["args"]) for op in operations
+    ):  # decision F: a "no" with arguments of a pending tool is a correction (D7.3)
+        steps, merges = _merge_steps(pending, operations, turn_input.message)
+        return _after_merge(pending, steps, merges, now, route="reject_merged")
+    if act in (Act.REJECT, Act.CANCEL):
+        closed = _closed_without_running(pending, CANCELLED, history)
+        return TurnOutcome(_discarded_line(pending), state_delta=closed, route="cancelled")
+    # `question` or `other`: answer what the agent can do, then repeat what is pending.
+    outcome = _repeat_pending(pending, [], now, route="pending_template")
+    outcome.reply = f"{replies.capabilities(ask=False)}\n{outcome.reply}"
+    return outcome
+
+
+def _closed_without_running(pending: dict, status: str, history: Sequence[dict]) -> dict:
+    """The state delta of a record closed without running: `pending` emptied and the record in
+    `history` with its steps as they were (D6; decision A of brief 12)."""
+    entry = closed_entry(pending, status, pending["steps"])
+    return {"pending": None, "history": appended(history, entry)}
+
+
+def _discarded_line(pending: dict) -> str:
+    return replies.discarded_line([TOOLS[name] for name in pending["tools"]])
 
 
 def _is_same_tool(pending: dict | None, act: Act, operations: list[dict]) -> bool:
@@ -340,7 +407,7 @@ def _confirm(
     3. Operations of the pending tool are merged first. A change, a rejected name or a note
        never runs: the lines are shown and the record is validated again (D4 to D7; D38).
     4. Still `collecting`: a "yes" while something is missing or invalid repeats the invalid
-       lines and the question (D7.1).
+       lines and the question (D7.1), assessed again against `now` like 1 and 2 (D57).
     5. D7.2: the steps are validated again against `now` and the hash of the values shown now
        must match the stored one. Otherwise the record is assessed again, as after a change:
        still valid -> the fixed line that says the values changed, then the confirmation with
@@ -360,7 +427,7 @@ def _confirm(
         return _after_merge(pending, steps, merges, now, route="confirm_merged")
 
     if pending["status"] != AWAITING_CONFIRMATION:
-        return _pending_outcome(pending, [], now, route="confirm_incomplete", changed=False)
+        return _repeat_pending(pending, [], now, route="confirm_incomplete")
 
     record = _reassessed(pending, pending["steps"], now)
     if record["status"] != AWAITING_CONFIRMATION:

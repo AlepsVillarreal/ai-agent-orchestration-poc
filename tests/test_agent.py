@@ -796,3 +796,77 @@ async def test_log_line_of_a_failed_and_an_uncertain_step(monkeypatch, caplog, m
     key = execution_key(session_id, "create_ticket", step["normalized"])
     assert f"route=confirmed {expected.format(key=key)}" in line
     assert "None" not in line.split(" changes=")[0]
+
+
+# Brief 12 -------------------------------------------------------------------------------------
+
+
+# 12 (case F, TASK.md lines 395-417): the meeting is abandoned, the ticket starts from nothing,
+# and the log ties the turn to the new ticket. `F2` as measured and its `provide_info` variant.
+@pytest.mark.parametrize("act", ["request_action", "provide_info"])
+async def test_case_f_through_the_node(monkeypatch, caplog, act):
+    _no_tool_runs(monkeypatch)
+    caplog.set_level(logging.INFO, logger="assistant")
+    f2 = {**FIXED["F2"].interpretation, "act": act}
+    fake = ScriptedLlm(script=[json.dumps(FIXED["F1"].interpretation), json.dumps(f2)])
+    runner, sessions = make_runner(fake)
+
+    await run_turn(runner, USER, "s-f", FIXED["F1"].message)
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-f")
+    meeting = session.state["pending"]
+    caplog.clear()
+    events = await run_turn(runner, USER, "s-f", FIXED["F2"].message)
+
+    assert fake.calls == 2
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-f")
+    ticket = session.state["pending"]
+    assert ticket["tools"] == ["create_ticket"]
+    assert ticket["steps"] == [
+        {"tool": "create_ticket", "args": {"description": "revisar el servidor"}}
+    ]
+    [entry] = session.state["history"]
+    assert entry["operation_id"] == meeting["operation_id"]
+    assert entry["status"] == "abandoned"
+    assert entry["steps"] == [{"tool": "schedule_meeting", "args": {"attendees": ["Juan"]}}]
+    reply = event_text(reply_events(events)[0])
+    assert reply.startswith("No voy a programar una reunión; descarté lo que tenía pendiente.\n")
+    assert reply.endswith(ticket["last_question"])
+    [line] = _turn_records(caplog)
+    assert "route=other_tool:R2" in line
+    assert f"op={ticket['operation_id']}" in line
+
+
+# 13 (D7.3, TASK.md line 284): a "cancel" discards the notification; a later "yes" finds nothing.
+async def test_cancel_through_the_node(monkeypatch, caplog):
+    calls = record_tools(monkeypatch)
+    caplog.set_level(logging.INFO, logger="assistant")
+    cancel = {"act": "cancel", "operations": []}
+    script = [FIXED["G1"].interpretation, cancel, FIXED["G2"].interpretation]
+    fake = ScriptedLlm(script=[json.dumps(item) for item in script])
+    runner, sessions = make_runner(fake)
+
+    await run_turn(runner, USER, "s-c", FIXED["G1"].message)
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-c")
+    notification = session.state["pending"]
+    caplog.clear()
+    second = await run_turn(runner, USER, "s-c", "Mejor cancela")
+
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-c")
+    assert session.state["pending"] is None
+    [entry] = session.state["history"]
+    assert entry["operation_id"] == notification["operation_id"]
+    assert entry["status"] == "cancelled"
+    assert entry["steps"] == notification["steps"]
+    assert event_text(reply_events(second)[0]) == (
+        "No voy a enviar una notificación; descarté lo que tenía pendiente."
+    )
+    [line] = _turn_records(caplog)
+    assert "route=cancelled" in line
+    assert f"op={notification['operation_id']}" in line
+
+    third = await run_turn(runner, USER, "s-c", FIXED["G2"].message)
+
+    assert event_text(reply_events(third)[0]) == replies.NO_PENDING_OPERATION
+    assert calls["send_notification"] == []
+    assert all(not args for args in calls.values())
+    assert fake.calls == 3

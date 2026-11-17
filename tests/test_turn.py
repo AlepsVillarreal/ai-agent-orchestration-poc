@@ -280,16 +280,20 @@ def test_no_turn_executes_a_tool(monkeypatch):
     run_conversation("B1", "B2", "B3")  # case B until complete
 
 
-# 16: what stays provisional with something pending (tasks 12 and 13). F2 with F1 pending is
-# *Otra tool*, case F: nothing of the meeting is mixed into the ticket. ("A1", "G2") left in task
-# 10a: a "yes" while collecting repeats the question (test_yes_while_collecting_...).
-@pytest.mark.parametrize(("first", "key"), [("A1", "Q1"), ("F1", "F2")])
-def test_anything_with_pending_is_provisional_and_keeps_state(first, key):
+# 16, rewritten in task 12: with a `collecting` record nothing is provisional any more. Q1 is
+# decision D of brief 12 (state unchanged) and F2 with F1 pending is *Otra tool*, case F. Only a
+# clarification stays provisional (test_clarification_stays_provisional, task 13). ("A1", "G2")
+# left in task 10a: a "yes" while collecting repeats the question (test_yes_while_collecting_...).
+@pytest.mark.parametrize(
+    ("first", "key", "route", "keeps_state"),
+    [("A1", "Q1", "pending_template", True), ("F1", "F2", "other_tool:R2", False)],
+)
+def test_pending_branches_are_no_longer_provisional(first, key, route, keeps_state):
     pending = handle_fixed(None, first).state_delta["pending"]
     outcome = handle_fixed(pending, key)
 
-    assert outcome.route == "pending_provisional"
-    assert outcome.state_delta == {}
+    assert outcome.route == route
+    assert (outcome.state_delta == {}) == keeps_state
 
 
 # 17
@@ -1168,8 +1172,9 @@ def test_history_keeps_the_last_ten(monkeypatch, before, after):
     assert history == received
 
 
-# 5 (D6): only the route that runs a tool writes `history`.
-def test_only_a_confirmed_yes_writes_history():
+# 5 (D6): only a closing writes `history`. No fixed turn runs a tool here; since task 12 a change
+# of intention (`abandoned`) and a "no" (`cancelled`) close the pending record without running.
+def test_only_a_closing_writes_history():
     history = old_entries(2)
     outcomes = []
     for pending in (None, a1_pending()):
@@ -1187,10 +1192,18 @@ def test_only_a_confirmed_yes_writes_history():
         pending = outcome.state_delta.get("pending", pending)
         outcomes.append(outcome)
 
+    closings = {"cancelled": "cancelled", "other_tool": "abandoned"}
     for outcome in outcomes:
-        assert "history" not in outcome.state_delta, outcome.route
         assert outcome.route != "confirmed"
         assert outcome.results == []
+        status = closings.get(outcome.route.split(":")[0])
+        if status is None:
+            assert "history" not in outcome.state_delta, outcome.route
+            continue
+        new = outcome.state_delta["history"]
+        assert new[:-1] == history and new[-1]["status"] == status, outcome.route
+        assert outcome.state_delta["pending"] is None or outcome.route == "other_tool:R2"
+    assert {o.route for o in outcomes} >= {"cancelled", "other_tool:R2", "other_tool:R4"}
 
 
 # Brief 08b ------------------------------------------------------------------------------------
@@ -1936,3 +1949,493 @@ def test_without_executions_each_call_has_its_own_registry(monkeypatch):
         assert handle_fixed(record, "B4").reply.startswith("Listo: creé el ticket ")
 
     assert len(calls) == 2
+
+
+# Brief 12 -------------------------------------------------------------------------------------
+
+DISCARDED_MEETING = "No voy a programar una reunión; descarté lo que tenía pendiente."
+DISCARDED_TICKET = "No voy a crear un ticket; descarté lo que tenía pendiente."
+
+# `F2` as it came from the real model (`request_action`) and its `provide_info` variant, which
+# *Otra tool* also takes (finding 10 of 06-round-1).
+F2_ACTS = pytest.mark.parametrize("act", ["request_action", "provide_info"])
+
+
+def f2_as(act: str) -> TurnInterpretation:
+    return interpretation(act, op("create_ticket", description="revisar el servidor"))
+
+
+def handle(pending: dict | None, turn: TurnInterpretation, message: str, **kwargs) -> TurnOutcome:
+    return handle_turn(pending, turn, TurnInput(message, NOW, SESSION), **kwargs)
+
+
+def closed(pending: dict, status: str) -> dict:
+    """The history entry of a record closed without running (decision A of brief 12)."""
+    return {"operation_id": pending["operation_id"], "status": status, "steps": pending["steps"]}
+
+
+# 1 (case F, TASK.md lines 395-417; D3.1; author's answer B: option (a))
+@F2_ACTS
+def test_case_f_other_tool_abandons_and_starts_the_new_flow(monkeypatch, act):
+    calls = record_tools(monkeypatch)
+    meeting = f1_pending()
+
+    outcome = handle(meeting, f2_as(act), FIXED["F2"].message)
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "other_tool:R2"
+    assert record["tools"] == ["create_ticket"]
+    assert record["steps"] == [
+        {"tool": "create_ticket", "args": {"description": "revisar el servidor"}}
+    ]
+    assert record["operation_id"] != meeting["operation_id"]
+    for text in ("Juan", "attendees", "schedule_meeting"):
+        assert text not in json.dumps(record), text
+    assert outcome.state_delta["history"] == [closed(meeting, "abandoned")]
+
+    lines = _lines(outcome.reply)
+    assert lines == [
+        DISCARDED_MEETING,
+        "Anoté la descripción: revisar el servidor.",
+        record["last_question"],
+    ]
+    for label in ("el título", "la prioridad", "a quién se asigna"):
+        assert label in record["last_question"]
+    assert nothing_ran(calls)
+
+
+# 2 (TASK.md lines 282-284 and 436): after a change of intention, the "yes" runs only the new tool
+def test_other_tool_while_awaiting_confirmation_runs_only_the_new_tool(monkeypatch):
+    calls = record_tools(monkeypatch)
+    ticket = h1_pending()
+    assert ticket["status"] == "awaiting_confirmation"
+
+    changed = handle_fixed(ticket, "G1")
+    notification = changed.state_delta["pending"]
+    history = changed.state_delta["history"]
+
+    assert changed.route == "other_tool:R2"
+    assert history == [closed(ticket, "abandoned")]
+    assert notification["status"] == "awaiting_confirmation"
+    assert notification["tools"] == ["send_notification"]
+    assert _lines(changed.reply)[0] == DISCARDED_TICKET
+    assert changed.reply.endswith(confirmation_text(notification))
+    assert nothing_ran(calls)
+
+    yes = handle(notification, fixed("G2"), FIXED["G2"].message, history=history)
+
+    assert yes.route == "confirmed"
+    assert calls["send_notification"] == [G1_NORMALIZED]
+    assert calls["create_ticket"] == [] and calls["schedule_meeting"] == []
+    assert yes.state_delta["pending"] is None
+    assert [e["status"] for e in yes.state_delta["history"]] == ["abandoned", "completed"]
+    assert yes.state_delta["history"][-1]["operation_id"] == notification["operation_id"]
+
+
+# 3 (D3.1): a "no"/"cancel" that brings another tool is a change of intention, never `cancelled`
+_NEW_TICKET = op("create_ticket", description="revisar el servidor")
+_NEW_MEETING = op("schedule_meeting", attendees=["Juan"])
+
+
+@pytest.mark.parametrize(
+    ("first", "turn", "message", "route", "reply_end"),
+    [
+        (
+            "F1",
+            interpretation("reject", _NEW_TICKET),
+            "No, mejor crea un ticket para revisar el servidor",
+            "other_tool:R2",
+            None,
+        ),
+        (
+            "F1",
+            interpretation("cancel", _NEW_TICKET),
+            "Cancela eso, mejor crea un ticket para revisar el servidor",
+            "other_tool:R2",
+            None,
+        ),
+        (
+            "A1",
+            interpretation("request_action", _NEW_MEETING, op("create_ticket", title="Caída")),
+            "Mejor agenda una reunión con Juan y crea un ticket titulado Caída",
+            "other_tool:R3",
+            replies.ONE_OPERATION_AT_A_TIME,
+        ),
+        (
+            "A1",
+            interpretation(
+                "request_action", _NEW_MEETING, op("create_ticket", "plausible", title="Caída")
+            ),
+            "Mejor agenda una reunión con Juan y quizá un ticket titulado Caída",
+            "other_tool:R4",
+            replies.ONE_OPERATION_AT_A_TIME,
+        ),
+        # Review 12-1, should-fix 2 (D3.1): with `reject` or `cancel`, the operations of the
+        # pending tool go to the table too, so two `explicit` are R3, not the new ticket alone.
+        (
+            "F1",
+            interpretation("reject", op("schedule_meeting", attendees=["Ana"]), _NEW_TICKET),
+            "No, la reunión con Ana no; mejor crea un ticket para revisar el servidor",
+            "other_tool:R3",
+            replies.ONE_OPERATION_AT_A_TIME,
+        ),
+        (
+            "F1",
+            interpretation("cancel", op("schedule_meeting", attendees=["Ana"]), _NEW_TICKET),
+            "Cancela la reunión con Ana y crea un ticket para revisar el servidor",
+            "other_tool:R3",
+            replies.ONE_OPERATION_AT_A_TIME,
+        ),
+    ],
+)
+def test_reject_or_cancel_with_another_tool_is_a_change_of_intention(
+    monkeypatch, first, turn, message, route, reply_end
+):
+    calls = record_tools(monkeypatch)
+    pending = handle_fixed(None, first).state_delta["pending"]
+
+    outcome = handle(pending, turn, message)
+
+    assert outcome.route == route
+    assert outcome.state_delta["history"] == [closed(pending, "abandoned")]
+    discarded = DISCARDED_MEETING if first == "F1" else DISCARDED_TICKET
+    assert _lines(outcome.reply)[0] == discarded
+    if reply_end is None:  # R2: the new ticket, with nothing of the meeting
+        record = outcome.state_delta["pending"]
+        assert record["steps"] == [{"tool": "create_ticket", "args": _NEW_TICKET["args"]}]
+    else:  # R3/R4 create nothing yet (task 14a): the pending record is gone all the same
+        assert outcome.state_delta["pending"] is None
+        assert outcome.reply == f"{discarded}\n{reply_end}"
+    assert nothing_ran(calls)
+
+
+# 4 (D3, RF-02 lines 128-134; decision E): a `plausible` never discards nor starts a flow
+@pytest.mark.parametrize(
+    ("turn", "message"),
+    [
+        (
+            interpretation(
+                "request_action", op("send_notification", "plausible", recipient="Carlos")
+            ),
+            "Quizá avísale a Carlos",
+        ),
+        (
+            interpretation(
+                "request_action",
+                op("create_ticket", priority="alta"),
+                op("send_notification", "plausible", recipient="Carlos"),
+            ),
+            "Prioridad alta, y quizá avísale a Carlos",
+        ),
+    ],
+)
+def test_only_plausible_of_another_tool_repeats_the_question(monkeypatch, turn, message):
+    calls = record_tools(monkeypatch)
+    pending = a1_pending()
+
+    outcome = handle(pending, turn, message)
+
+    assert outcome.route == "plausible_other_tool"
+    assert outcome.state_delta == {}
+    assert outcome.reply == pending["last_question"]
+    assert "priority" not in pending["steps"][0]["args"]  # the data of the pending tool too
+    assert nothing_ran(calls)
+
+
+# 5 (D3 *Resto*, D20, TASK.md line 554; decision D)
+@pytest.mark.parametrize("key", ["Q1", "K3"])
+@pytest.mark.parametrize("first", ["A1", "H1"])
+def test_question_or_other_with_pending_keeps_state(monkeypatch, first, key):
+    calls = record_tools(monkeypatch)
+    pending = handle_fixed(None, first).state_delta["pending"]
+
+    outcome = handle_fixed(pending, key)
+
+    assert outcome.route == "pending_template"
+    assert outcome.state_delta == {}
+    lines = _lines(outcome.reply)
+    assert lines[0] == replies.capabilities(ask=False)
+    assert lines[0] == (
+        "Puedo ayudarte a crear un ticket, programar una reunión o enviar una notificación."
+    )
+    assert "¿Qué necesitas?" not in outcome.reply
+    if first == "A1":
+        assert lines[-1] == pending["last_question"]
+    else:
+        assert outcome.reply.endswith(confirmation_text(pending))
+    assert nothing_ran(calls)
+
+
+# Review 12-1, should-fix 1 (D3 *Resto*, D20, TASK.md line 554): a `question` or an `other` that
+# brings operations applies none of them, neither data of the pending tool nor another tool.
+@pytest.mark.parametrize("act", ["question", "other"])
+@pytest.mark.parametrize(
+    ("operation", "message"),
+    [
+        (op("create_ticket", priority="alta"), "¿La prioridad alta es la más urgente?"),
+        (op("send_notification", recipient="Carlos"), "¿Puedes avisarle a Carlos por SMS?"),
+    ],
+)
+def test_question_or_other_with_operations_keeps_state(monkeypatch, act, operation, message):
+    calls = record_tools(monkeypatch)
+    pending = a1_pending()
+
+    outcome = handle(pending, interpretation(act, operation), message)
+
+    assert outcome.route == "pending_template"
+    assert outcome.state_delta == {}
+    assert outcome.reply == f"{replies.capabilities(ask=False)}\n{pending['last_question']}"
+    assert nothing_ran(calls)
+
+
+# Review 12-1, should-fix 3 (D57; decision D): the other branches that repeat what is pending
+# also assess it against `now`. "Hoy a las 10" confirmed at 09:00, then at 10:30 a question or
+# a lone `plausible` of another tool: the reply reports the time, never the old confirmation.
+@pytest.mark.parametrize(
+    ("turn", "message", "route"),
+    [
+        (
+            interpretation("request_action", op("send_notification", "plausible")),
+            "Quizá avísale",
+            "plausible_other_tool",
+        ),
+        (fixed("Q1"), FIXED["Q1"].message, "pending_template"),
+    ],
+)
+def test_repeating_branches_reassess_against_now(monkeypatch, turn, message, route):
+    calls = record_tools(monkeypatch)
+    today_at_10 = _meeting(date={"relative_days": 0}, time={"hour": 10})
+    pending = handle(None, today_at_10, _TODAY_MESSAGE).state_delta["pending"]
+    assert pending["status"] == "awaiting_confirmation"
+
+    later = handle_turn(pending, turn, TurnInput(message, datetime(2026, 11, 17, 10, 30), SESSION))
+    record = later.state_delta["pending"]
+
+    assert later.route == route
+    assert record["status"] == "collecting"
+    assert "confirmation_hash" not in record
+    assert record["invalid"] == [{"tool": "schedule_meeting", "field": "time", "cause": "past"}]
+    assert record["steps"] == pending["steps"]  # nothing of the message got in
+    lines = _lines(later.reply)
+    assert "La hora indicada ya pasó." in lines
+    assert lines[-1] == record["last_question"]
+    assert not any(line.startswith("Voy a") for line in lines)
+
+    early = handle_turn(pending, turn, TurnInput(message, datetime(2026, 11, 17, 9, 30), SESSION))
+    assert early.route == route
+    assert early.state_delta == {}
+    assert early.reply.endswith(confirmation_text(pending))
+    assert nothing_ran(calls)
+
+
+# 6 (D7.3, TASK.md line 284; decision C)
+_PLAIN_NO = [
+    (interpretation("cancel"), "Mejor cancela"),
+    (interpretation("cancel", op("create_ticket", priority="alta")), "Cancela el ticket de alta"),
+    (fixed("S2"), FIXED["S2"].message),
+    (interpretation("reject", op("create_ticket")), "No, el ticket no"),
+    # Review 12-2, should-fix 1 (decision F; AY): only arguments of a *pending* tool make a "no"
+    # a correction. A lone `plausible` of another tool with arguments does not: the "no" discards.
+    (
+        interpretation("reject", op("send_notification", "plausible", recipient="Carlos")),
+        "No, quizá avísale a Carlos",
+    ),
+]
+
+
+@pytest.mark.parametrize(("turn", "message"), _PLAIN_NO)
+@pytest.mark.parametrize("first", ["A1", "H1"])
+def test_cancel_or_plain_reject_discards_and_archives(monkeypatch, first, turn, message):
+    calls = record_tools(monkeypatch)
+    pending = handle_fixed(None, first).state_delta["pending"]
+
+    outcome = handle(pending, turn, message)
+
+    assert outcome.route == "cancelled"
+    assert outcome.state_delta == {"pending": None, "history": [closed(pending, "cancelled")]}
+    assert outcome.reply == DISCARDED_TICKET
+
+    after = handle(None, fixed("G2"), FIXED["G2"].message)
+    assert after.reply == replies.NO_PENDING_OPERATION
+    assert after.state_delta == {}
+    assert nothing_ran(calls)
+
+
+def test_discarded_line_joins_actions_with_ni():
+    tools = [TOOLS["create_ticket"], TOOLS["send_notification"]]
+    assert replies.discarded_line(tools) == (
+        "No voy a crear un ticket ni enviar una notificación; descarté lo que tenía pendiente."
+    )
+
+
+# 7 (D7.3, D4, TASK.md lines 145 and 557; decision F)
+def test_reject_with_args_is_a_correction(monkeypatch):
+    calls = record_tools(monkeypatch)
+    ticket = h1_pending()
+    to_ana = interpretation("reject", op("create_ticket", assignee="Ana"))
+
+    outcome = handle(ticket, to_ana, "No, asígnalo a Ana")
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "reject_merged"
+    [change] = outcome.changes
+    assert (change.kind, change.old, change.new) == ("overwrite", "Carlos", "Ana")
+    assert _lines(outcome.reply)[0] == "Cambié a quién se asigna: Carlos → Ana."
+    assert record["status"] == "awaiting_confirmation"
+    assert record["confirmation_hash"] != ticket["confirmation_hash"]
+    assert record["operation_id"] == ticket["operation_id"]
+    assert outcome.reply.endswith(confirmation_text(record))
+    assert nothing_ran(calls)
+
+    yes = handle_fixed(record, "B4")
+    assert yes.route == "confirmed"
+    [args] = calls["create_ticket"]
+    assert args["assignee"] == "Ana"
+
+    # The stored value again: no change, nothing written, the confirmation repeated (D40, D57).
+    same = handle(
+        ticket, interpretation("reject", op("create_ticket", assignee="Carlos")), "No, a Carlos"
+    )
+    assert same.route == "reject_merged"
+    assert same.state_delta == {}
+    assert same.reply == confirmation_text(ticket)
+
+    # A correction while collecting stays collecting.
+    collecting = a1_pending()
+    alta = handle(
+        collecting, interpretation("reject", op("create_ticket", priority="alta")), "No, alta"
+    )
+    assert alta.route == "reject_merged"
+    assert alta.state_delta["pending"]["status"] == "collecting"
+    assert alta.state_delta["pending"]["steps"][0]["args"]["priority"] == "alta"
+    assert "history" not in alta.state_delta
+    assert len(calls["create_ticket"]) == 1  # only the "yes" above ran
+
+
+# 8 (note (xxx), D57): a "yes" on a `collecting` record is assessed again against `now`
+def test_confirm_incomplete_reassesses_against_now(monkeypatch):
+    calls = record_tools(monkeypatch)
+    untitled = interpretation(
+        "request_action",
+        op(
+            "schedule_meeting",
+            date={"relative_days": 0},
+            time={"hour": 10},
+            duration_minutes=30,
+            attendees=["Juan", "Ana"],
+        ),
+    )
+    message = "Agenda una reunión hoy a las 10, 30 minutos, con Juan y Ana"
+    pending = handle(None, untitled, message).state_delta["pending"]
+    assert pending["status"] == "collecting" and pending["invalid"] == []
+
+    later = handle_turn(
+        pending, fixed("G2"), TurnInput("Sí, hazlo", datetime(2026, 11, 17, 10, 30), SESSION)
+    )
+    record = later.state_delta["pending"]
+
+    assert later.route == "confirm_incomplete"
+    assert record["invalid"] == [{"tool": "schedule_meeting", "field": "time", "cause": "past"}]
+    assert record["steps"] == pending["steps"]
+    lines = _lines(later.reply)
+    assert "La hora indicada ya pasó." in lines
+    assert lines[-1] == record["last_question"]
+    assert "el título" in record["last_question"] and "la hora" in record["last_question"]
+
+    early = handle_turn(
+        pending, fixed("G2"), TurnInput("Sí, hazlo", datetime(2026, 11, 17, 9, 30), SESSION)
+    )
+    assert early.route == "confirm_incomplete"
+    assert early.state_delta == {}
+    assert early.reply == pending["last_question"]
+    assert nothing_ran(calls)
+
+
+# 9 (note (ll), D41): the D10 line goes first in every new branch with something pending
+_PIZZA = op("pedir_pizza", size="grande")
+
+
+def _with_pizza(turn: TurnInterpretation) -> TurnInterpretation:
+    data = turn.model_dump()
+    data["operations"].append(_PIZZA)
+    return TurnInterpretation.model_validate(data)
+
+
+@pytest.mark.parametrize(
+    ("first", "turn", "message", "route"),
+    [
+        ("F1", fixed("F2"), FIXED["F2"].message, "other_tool:R2"),
+        ("A1", interpretation("cancel"), "Mejor cancela", "cancelled"),
+        (
+            "H1",
+            interpretation("reject", op("create_ticket", assignee="Ana")),
+            "No, asígnalo a Ana",
+            "reject_merged",
+        ),
+        (
+            "A1",
+            interpretation("request_action", op("send_notification", "plausible")),
+            "Quizá avísale",
+            "plausible_other_tool",
+        ),
+        ("A1", fixed("Q1"), FIXED["Q1"].message, "pending_template"),
+    ],
+)
+def test_d10_line_before_every_new_pending_branch(first, turn, message, route):
+    pending = handle_fixed(None, first).state_delta["pending"]
+
+    plain = handle(pending, turn, message)
+    pizza = handle(pending, _with_pizza(turn), f"{message} y pide una pizza grande")
+
+    assert plain.route == pizza.route == route
+    assert pizza.reply == f"{replies.UNKNOWN_TOOL_LINE}\n{plain.reply}"
+
+    def without_new_id(delta: dict) -> dict:
+        record = delta.get("pending")
+        if record and record.get("operation_id") != pending["operation_id"]:
+            return {**delta, "pending": {k: v for k, v in record.items() if k != "operation_id"}}
+        return delta
+
+    assert without_new_id(pizza.state_delta) == without_new_id(plain.state_delta)
+
+
+# 10 (D3 step 2): a clarification is still provisional (task 13), whatever comes
+_CLARIFYING = {
+    "tools": ["send_notification", "schedule_meeting"],
+    "status": "awaiting_clarification",
+    "missing": [],
+    "last_question": "¿Quieres enviar una notificación, programar una reunión, o ambas?",
+}  # the literal record of test_same_tool_needs_a_collecting_record
+
+
+@pytest.mark.parametrize(
+    ("turn", "message"),
+    [(fixed("F2"), FIXED["F2"].message), (interpretation("cancel"), "Mejor cancela")],
+)
+def test_clarification_stays_provisional(turn, message):
+    outcome = handle(dict(_CLARIFYING), turn, message)
+
+    assert outcome.route == "pending_provisional"
+    assert outcome.reply == replies.PENDING_NOT_SUPPORTED_YET
+    assert outcome.state_delta == {}
+
+
+# 11 (D6): a closing without running also keeps only the last ten
+@pytest.mark.parametrize(
+    ("turn", "message", "status"),
+    [
+        (f2_as("request_action"), FIXED["F2"].message, "abandoned"),
+        (interpretation("cancel"), "Cancela", "cancelled"),
+    ],
+)
+def test_closing_without_running_keeps_the_last_ten(turn, message, status):
+    history = old_entries(10)
+    received = json.loads(json.dumps(history))
+    pending = f1_pending()
+
+    new = handle(pending, turn, message, history=history).state_delta["history"]
+
+    assert len(new) == 10
+    assert new[-1] == closed(pending, status)
+    assert new[:-1] == received[1:]
+    assert history == received
