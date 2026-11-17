@@ -15,7 +15,7 @@ no forma parte del repositorio.
   producir una pregunta equivocada, nunca una ejecución equivocada.
 - **Alcance mínimo (≈20–22 h):** contratos Pydantic y validador por campo; una operación
   pendiente en `session.state` con reductor; respuestas con plantillas; plan lineal de dos pasos
-  para el caso E; confirmación ligada a `operation_id` + hash de argumentos; clave de
+  para el caso E [enmendado en D8]; confirmación ligada a `operation_id` + hash de argumentos; clave de
   idempotencia por ejecución; tests A–H con interpretaciones fijas y una corrida grabada con el
   modelo real.
 - **Repliegue:** si una prueba temprana muestra que el modelo no llena el esquema de forma
@@ -89,7 +89,7 @@ no forma parte del repositorio.
   se define en D4); tabla de sinónimos en español e inglés para `priority` y `channel`.
 - **Solo para logs:** `ambiguity_reason` se registra y ninguna decisión lo lee; un test lo
   demuestra. Que el código llegue a usarlo requiere una decisión nueva.
-- **Umbral de fiabilidad (fase 0):** modelo base `gemini-3.5-flash-lite`. 23 escenarios (A,
+- **Umbral de fiabilidad (fase 0):** [enmendado en F0] modelo base `gemini-3.5-flash-lite`. 23 escenarios (A,
   B, C, D, E, F, G, X —un valor de enum no permitido, como "urgente"—, pregunta informativa,
   día de la semana, el contraste del caso C —"Avísale a Carlos que el servidor ya está
   disponible", TASK.md línea 117—, el primer mensaje del caso G —TASK.md línea 424—,
@@ -142,8 +142,8 @@ no forma parte del repositorio.
   preguntar). De S3 se conservan `confirms_tool` y `ambiguity_reason`.
 - **Pendiente:** D4, anclaje de nombres duro o blando y reglas de fusión (para las listas
   ya hay un marcador que leer: las cubetas `_add` y `_remove` de la enmienda; D4 fija las
-  reglas de borde) [resuelto en D4]; D7, confirmación, reglas del veto de `confirms_tool` y números no
-  escritos como cifras; D8, regla de `depends_on`. Sin asignar: un posible marcador de
+  reglas de borde) [resuelto en D4]; D7, confirmación [resuelto en D7], reglas del veto de `confirms_tool` y números no
+  escritos como cifras; D8, regla de `depends_on` [resuelto en D8]. Sin asignar: un posible marcador de
   "instancia nueva" para "crea otro ticket" con un ticket pendiente (misma causa: la
   palabra "otro" se pierde en el intérprete); no forma parte de esta enmienda.
 
@@ -190,7 +190,7 @@ no forma parte del repositorio.
     el cuerpo y gasta cuota de la capa gratuita.
   - *Reanudación (resumability) desactivada,* que es el valor por defecto
     (`App.resumability_config = None`). La CLI siempre envía un mensaje nuevo y nunca un
-    `invocation_id`. Si D9 la activa, el cuerpo puede ejecutarse dos veces, así que la
+    `invocation_id`. Si D9 la activa [resuelto en D9], el cuerpo puede ejecutarse dos veces, así que la
     ejecución ya debe ser segura bajo la clave de idempotencia.
   - *Frontera:* el núcleo no importa ADK. El nodo es el único adaptador.
 - **Costos aceptados:** el evento JSON del intérprete queda guardado en `session.events`, y un
@@ -283,7 +283,7 @@ no forma parte del repositorio.
   separados porque `question` es la respuesta a la pregunta de defensa 2 (TASK.md línea 554);
   pueden fusionarse si la fase 0 muestra que el modelo los confunde. Para D3, `reject` y
   `cancel` hacen lo mismo; su diferencia es de D7.
-- **Aclaración (provisional):** estas reglas son provisionales hasta que las tres respuestas a
+- **Aclaración (provisional):** [enmendado en F0] estas reglas son provisionales hasta que las tres respuestas a
   una aclaración y las tres sondas pasen la fase 0 (D2). La revisión adversarial de este diseño
   se hizo el 2026-11-16 y sus correcciones ya están aquí. Que solo `explicit` seleccione no se
   ha probado con el modelo.
@@ -354,7 +354,7 @@ no forma parte del repositorio.
     (R2 inicia el flujo y los campos faltantes lo detienen).
   - *Caso C devuelto como dos `explicit`:* cae en R3 y se construye un plan. Ninguna regla de
     D3 lo detiene (TASK.md línea 134); lo frenan los campos faltantes de la reunión y la
-    confirmación del plan, si D7 la adopta.
+    confirmación del plan, si D7 la adopta [resuelto en D7].
   - *Afirmación leída como solicitud con todos los argumentos:* R2 inicia el flujo y nada en
     D3, D4 o D5 lo detiene. Que falten argumentos no es una capa de seguridad diseñada: depende
     de lo que traiga el mensaje.
@@ -365,7 +365,7 @@ no forma parte del repositorio.
     `explicit`, el agente actúa bien para lo que recibió (R2, pregunta el canal) y la reunión
     nunca se ofrece. Ninguna capa puede detectar una lectura que el modelo no reportó. Se mide
     con el resultado del caso C en la fase 0.
-- **Disparador para pasar a P2′:**
+- **Disparador para pasar a P2′:** [enmendado en F0]
   - *Escenarios claros:* aquellos cuya interpretación esperada llega a la tabla sin ninguna
     `plausible`: A, D, E, F (segundo mensaje), X, día de la semana, el contraste del caso C
     (TASK.md línea 117), el primer mensaje del caso G (línea 424) y la línea 113. Son
@@ -406,14 +406,14 @@ no forma parte del repositorio.
   argumentos guardados, y "crea otro ticket" con un ticket pendiente (la compuerta lo fusiona
   con el pendiente) [resuelto en D4]; D7, qué tools quedan exentas de confirmación (nunca en el turno que
   resuelve una aclaración), la confirmación de planes y la diferencia entre `reject` y
-  `cancel`; D8, hereda que el plan de una aclaración es lineal, en el orden de las candidatas
-  y con la dependencia que ya traían. Sin asignar: nombres de tools como enum cerrado o cadena
-  libre; avisar al usuario de las operaciones `explicit` que el filtro del registro descarta;
+  `cancel` [resuelto en D7]; D8, hereda que el plan de una aclaración es lineal, en el orden de las candidatas
+  y con la dependencia que ya traían [resuelto en D8]. Sin asignar: nombres de tools como enum cerrado o cadena
+  libre [resuelto en D10]; avisar al usuario de las operaciones `explicit` que el filtro del registro descarta [resuelto en D10];
   una `question` durante una aclaración (hoy cuenta como respuesta no clara); dos operaciones
-  de la misma tool con distinta `certainty`; R3 con tres o más `explicit` (D1 prevé dos
-  pasos); `asked_turn` e `id` de la aclaración, que ninguna regla lee; y dónde vive un
-  registro "archivado". Revisión adversarial de la aclaración: hecha el 2026-11-16. La marca
-  "provisional" se quita cuando las tres respuestas y las tres sondas pasen la fase 0.
+  de la misma tool con distinta `certainty` [resuelto en D11]; R3 con tres o más `explicit` (D1 prevé dos
+  pasos) [resuelto en D8]; `asked_turn` e `id` de la aclaración, que ninguna regla lee; y dónde vive un
+  registro "archivado" [resuelto en D6]. Revisión adversarial de la aclaración: hecha el 2026-11-16. La marca
+  "provisional" se quita cuando las tres respuestas y las tres sondas pasen la fase 0 [enmendado en F0].
 
 **D4 · Fusión de argumentos entre turnos y anclaje duro de nombres** (2026-11-16)
 
@@ -516,10 +516,235 @@ no forma parte del repositorio.
   que liste los valores de cada paso, porque cambiar el responsable del ticket no toca el
   destinatario de la notificación; si el hash de confirmación cubre los argumentos guardados
   o los valores normalizados que se muestran; un `reject` que trae argumentos; y un "sí,
-  pero…" que el modelo devuelve como `confirm` sin argumentos. D5: valores por defecto de
+  pero…" que el modelo devuelve como `confirm` sin argumentos [resuelto en D7]. D5: valores por defecto de
   una fecha parcial, tipos de fecha mezclados, quién reporta dos argumentos que no
-  concuerdan y `duration_minutes=0`. D8: un argumento que el modelo coloca en el paso
+  concuerdan y `duration_minutes=0` [resuelto en D5]. D8: un argumento que el modelo coloca en el paso
   equivocado de un plan lo quita el filtro por contrato de D2 y nadie lo avisa. Sin
   asignar: anclar las palabras de `priority` y `channel`; se revisa si la fase 0 muestra
   que el modelo cambia esas palabras. Para leer la fase 0: un número que el mensaje no
   contenía cuenta como fallo crítico.
+
+**D5 · Validación por tipo de campo** (2026-11-16)
+
+- **Decisión:** el validador es Python puro, corre después de la fusión de D4 y declara cada
+  regla por tipo de campo en el registro. Devuelve faltantes, inválidos con su causa y los
+  valores normalizados que muestra la confirmación (D7).
+  - *D5.1 · Fechas:* `relative_days` y `weekday` se resuelven contra "hoy" (un día de la
+    semana es su próxima ocurrencia, sin contar hoy); sin año, la próxima ocurrencia de ese
+    día y mes; sin mes, el campo falta y se pregunta; un día que no existe es inválido.
+    "Hoy" es la fecha local de la máquina y los tests la inyectan.
+  - *D5.1b · Fecha pasada:* es inválida, como restricción de negocio.
+  - *D5.1c · Formas mezcladas:* dos formas de fecha que no dan el mismo día ("el viernes 27"
+    si el 27 no es viernes) son un error de coherencia; ninguna gana.
+  - *D5.2 · Horas:* `hour` 0–23 y `minute` 0–59; sin minuto, `:00`; sin hora, el campo
+    falta. Una hora sin "de la tarde" se toma como llegó y se ve en la confirmación. Fecha y
+    hora juntas en el pasado son un error de coherencia.
+  - *D5.3 · Duración:* entero de 1 a 480 (8 h); `0` y los negativos son inválidos.
+  - *D5.4 · Personas* (`assignee`, `recipient`, `attendees`): texto no vacío y anclado
+    (D4), nada más. Sin directorio y sin exigir correo o teléfono según `channel`.
+- **Motivo:** RF-04 pide validar tipos, formatos, restricciones de negocio y coherencia
+  (TASK.md líneas 155-163), y RF-06 y el caso D piden nombrar el problema de la fecha y el
+  de la hora (líneas 186-200 y 361-371). La fecha aporta una regla de negocio (fecha
+  pasada) y dos de coherencia (formas mezcladas; fecha y hora en el pasado). Solo se
+  completan el año y el minuto; el mes y la hora se preguntan, porque completarlos sería
+  inventar (línea 184). La lectura AM/PM la protege la confirmación de D7, no el validador
+  (líneas 72 y 194-198). Un rango fijo resuelve el `duration_minutes=0` que D4 dejó a D5
+  (líneas 73 y 161). El caso G solo da "Carlos" y debe llegar a la confirmación sin pedir
+  más (líneas 424-438); un directorio sería una regla de negocio que nadie pidió (líneas
+  54, 74 y 90).
+- **Descartadas:**
+  - *D5.1:* sin año, el año en curso (y fecha pasada si ya pasó); aceptar solo
+    `relative_days` o día y mes, y volver a pedir `weekday` y cualquier mezcla.
+  - *D5.1b:* aceptar una fecha pasada.
+  - *D5.1c:* que gane la primera forma y se avise (el código elegiría por el usuario).
+  - *D5.2:* un horario laboral (p. ej. 08:00–20:00) como restricción de negocio; preguntar
+    mañana o tarde ante una hora de 1 a 12.
+  - *D5.3:* mayor que 0 sin tope; de 15 a 480 en múltiplos de 15.
+  - *D5.4:* un directorio fijo con correo y teléfono, que invalida a quien no esté; exigir
+    que `recipient` sea un correo con `email` y un teléfono con `sms`.
+- **Resuelve** lo que D4 dejó a D5: valores por defecto de una fecha parcial, tipos de
+  fecha mezclados, quién reporta dos argumentos que no concuerdan (el validador, como error
+  de coherencia) y `duration_minutes=0`.
+
+**D6 · Archivado y resultados** (2026-11-16)
+
+- **Decisión:** al cerrarse (completado, fallido, incierto, cancelado o abandonado por un
+  cambio de intención), el registro pendiente sale de `pending` y se agrega a
+  `session.state["history"]`, que guarda los últimos 10 con su estado final, sus valores y
+  su resultado. Ninguna regla lo lee: la fusión no lee archivados (D4).
+- **Motivo:** RF-07 pide mantener el estado de ejecución y los resultados de las tools
+  (TASK.md líneas 208-229, en especial 220-222); así tienen un lugar en el mismo estado de
+  Redis, sin un almacén nuevo. El caso F archiva el flujo abandonado sin mezclarlo (líneas
+  411-417). El resultado también queda bajo la clave de idempotencia (D9), que es la que se
+  consulta antes de ejecutar.
+- **Descartadas:** borrar el registro y dejar solo la línea de log (RF-07 pide mantener los
+  resultados); una clave aparte en Redis por sesión, fuera de `session.state` (un almacén
+  más para datos que ninguna regla lee).
+- **Repliegue por plazo:** borrar el registro y dejar solo el log; es el tercer recorte de
+  código, después de los de D8.1 y D7.3.
+
+**D7 · Confirmación** (2026-11-16)
+
+- **Decisión:**
+  - *D7.1 · Qué se confirma:* todo, siempre. Cada operación y cada plan necesitan un "sí"
+    explícito; un plan se confirma una sola vez, con los valores normalizados de cada paso.
+    Un "sí" mientras faltan datos o hay inválidos no ejecuta y repite la pregunta pendiente.
+    Ninguna tool queda exenta, así que un turno solo con `fill` nunca ejecuta.
+  - *D7.2 · Hash:* el hash de D1 cubre los valores normalizados que se mostraron (p. ej. la
+    fecha ISO ya resuelta de "mañana"). Al llegar el "sí" se recalcula y debe coincidir; si
+    "mañana" cambió de día a medianoche, el hash cambia y se vuelve a preguntar.
+  - *D7.3 · `reject` y `cancel`:* `cancel` descarta la operación pendiente; `reject` sin
+    argumentos también. `reject` con argumentos de la tool pendiente es una corrección: pasa
+    por la fusión de D4, nunca ejecuta y vuelve a pedir confirmación.
+- **Cumple lo que D4 exige a D7:**
+  - *La fusión corre antes de evaluar un `confirm`:* en el paso "Resto" de la compuerta de
+    D3, un `confirm` o un `reject` que trae argumentos de la tool pendiente pasa primero por
+    la fusión, y solo después se evalúa.
+  - *Un "sí" cuenta solo en un turno cuya fusión no devolvió nada:* ningún cambio, ningún
+    nombre rechazado, ninguna nota, y el hash de D7.2 coincide.
+  - *Un turno con un `overwrite`, un `clear`, un nombre rechazado o una nota nunca ejecuta:*
+    muestra lo que cambió y vuelve a pedir confirmación.
+  - Cumple también D3: sin tools exentas, el turno que resuelve una aclaración nunca
+    ejecuta.
+- **Motivo:** RF-08 y RF-10 piden ejecutar solo con autorización y atar el "sí" a una
+  operación identificada (TASK.md líneas 233-243 y 276-284), y el caso G confirma antes de
+  ejecutar (líneas 420-438). Una regla sin excepciones cubre G y los dos casos en que D3 se
+  apoya en la confirmación: una solicitud completa en un solo mensaje y el caso C leído
+  como dos `explicit`. El hash sobre lo mostrado confirma exactamente lo que el usuario vio.
+  Un `reject` con argumentos es la opción más chica que no pierde "No, mejor a las 11", que
+  la línea 145 obliga a incorporar.
+- **Descartadas:**
+  - *D7.1:* eximir `create_ticket`, que se ejecutaría en el turno en que queda completo si
+    solo trajo `fill`; confirmar solo `send_notification` y los planes.
+  - *D7.2:* hash de los argumentos guardados, con las palabras del usuario (no cambia si
+    "mañana" pasa a ser otro día); sin hash, solo `operation_id` y la regla de D4.
+  - *D7.3:* descartar siempre e ignorar con un aviso los argumentos de un `reject` (pierde
+    la corrección); que `reject` nunca descarte y pregunte qué cambiar.
+- **Repliegue por plazo:** en D7.3, `reject` y `cancel` descartan siempre; es el segundo
+  recorte de código.
+- **Para el README:** el caso B termina con un "sí", que TASK.md líneas 311-335 no muestran.
+- **Limitación para el README:** "Sí, pero por SMS" devuelto como `confirm` sin argumentos
+  ejecuta los valores mostrados; el código no puede ver el "pero" (D4).
+- **Pendiente:** las reglas del veto de `confirms_tool` con una operación pendiente (D2 solo
+  fija "nulo no bloquea") y los números no escritos como cifras (D2). Ninguna opción
+  aprobada los cubre.
+
+**D8 · Plan de varias tools** (2026-11-16)
+
+- **Decisión:**
+  - *D8.1 · Forma:* lineal, una tool por paso, hasta las tres del catálogo. Cada paso va
+    después del que nombra en `depends_on`; un `depends_on` que apunta fuera del plan o forma
+    un ciclo se ignora y se anota en el log. El plan se detiene en el primer fallo, aunque
+    los pasos no dependan entre sí. Una sola confirmación para todo el plan (D7.1). Amplía el
+    plan de dos pasos del alcance mínimo de D1.
+  - *D8.2 · `ticket_id`:* el registro declara que un paso de `send_notification` que depende
+    de `create_ticket` recibe el `ticket_id` al final de `message` ("… (ticket TCK-0001)").
+    `message` sigue siendo obligatorio y se pide si falta. La confirmación del plan dice "se
+    añadirá el número de ticket".
+  - *D8.3 · Fallos parciales:* si falla el paso 1, el 2 no corre, el plan se cierra como
+    `failed` y se informa. Si falla el 2, se informan el ticket creado y el fallo, y el plan
+    se cierra. Sin reintento automático: para reintentar, el usuario repite la solicitud y la
+    idempotencia (D9) devuelve el ticket existente en vez de crear otro. Los mocks fallan por
+    parámetro en los tests y con `MOCK_FAIL=create_ticket` en la CLI.
+- **Motivo:** RF-09 y el caso E piden orden de ejecución, pasar el resultado y no ejecutar
+  la segunda tool si falla la primera (TASK.md líneas 120, 250-252, 260-270 y 378-392). Una
+  sola forma de plan, sin grafo: tres pasos cuestan lo mismo que dos y resuelven "R3 con
+  tres o más `explicit`", que D3 dejó sin asignar (línea 555). El código no redacta
+  contenido: solo añade un valor que él mismo produjo y que vive fuera de `args` (D4 regla
+  10; línea 184). Los fallos
+  parciales y los reintentos (líneas 270-272, 559 y 580) se explican con un mecanismo que ya
+  existe, la clave de D9.1; con otra clave, repetir la solicitud crearía un segundo ticket.
+- **Descartadas:**
+  - *D8.1:* exactamente dos pasos, respondiendo "una o dos operaciones a la vez" ante tres
+    `explicit`; ejecutar los pasos independientes aunque falle otro.
+  - *D8.2:* que el código genere `message` con una plantilla si falta (redactaría
+    contenido); un campo opcional `reference` en `send_notification` (cambia el contrato,
+    TASK.md líneas 89-92).
+  - *D8.3:* dejar pendiente el paso 2 fallido hasta un "reintenta"; un reintento automático
+    con la misma clave antes de reportar el fallo.
+- **Repliegue por plazo:** en D8.1, exactamente dos pasos (el alcance de D1), que es el
+  primer recorte de código; quitar `MOCK_FAIL` de la CLI y dejar el fallo solo como
+  parámetro de los tests es el cuarto.
+- **Sin cambio:** un argumento en el paso equivocado de un plan lo quita el filtro por
+  contrato y nadie lo avisa; sigue como limitación de D4.
+
+**D9 · Idempotencia y estado incierto** (2026-11-16)
+
+- **Decisión:**
+  - *D9.1 · Clave:* hash de sesión + tool + valores normalizados. Registro en Redis con
+    `SET NX`: `started` antes de llamar al mock y `done` con el resultado después, con TTL de
+    24 h. Una ejecución igual ya hecha devuelve el resultado guardado sin ejecutar ("Ese
+    ticket ya existía: TCK-0001").
+  - *D9.2 · Estado incierto:* `started` sin `done` (caída o timeout) no se reejecuta. La
+    operación se cierra como `uncertain` y se le dice al usuario que no se pudo confirmar si
+    se ejecutó y que no se reintentará; la clave expira con el TTL. La documentación explica
+    que con un proveedor que acepte claves de idempotencia se reintentaría con la misma.
+  - *Caso H, dos momentos:* con la operación pendiente, la misma solicitud entra por "Misma
+    tool" (D3), la fusión no cambia nada y se repite la pregunta; ya ejecutada, el duplicado
+    se detecta tras el "sí". Un "sí" reenviado tras un turno no persistido encuentra `done` y
+    no reejecuta.
+- **Motivo:** un solo mecanismo cubre las dos formas del caso H, el mensaje repetido y el
+  reintento tras un timeout (TASK.md líneas 286, 443-449 y 558). El registro vive fuera de
+  `session.state` porque el estado solo se escribe al final del turno (D1.1) y una caída a
+  mitad de la ejecución lo perdería. Ante la duda se ejecuta a lo más una vez: con un efecto
+  externo, un duplicado es peor que pedir verificación (líneas 272, 451 y 580). La
+  reanudación de ADK sigue desactivada (D1.1).
+- **Descartadas:**
+  - *D9.1:* `operation_id` + hash de la confirmación (protege el reintento del mismo "sí",
+    pero una solicitud idéntica repetida después de ejecutarse crea otro ticket); preguntar
+    "¿Creo otro igual?" ante una ejecución igual ya hecha.
+  - *D9.2:* reintentar con la misma clave y que el mock deduplique, como un proveedor;
+    preguntar al usuario si reintentar, con el riesgo de duplicado a la vista.
+- **Limitaciones para el README:** dos tickets idénticos a propósito en menos de 24 h no son
+  posibles; hay que cambiar algún valor. El duplicado se detecta al ejecutar, después del
+  "sí".
+- **Pendiente:** qué deja la clave cuando el mock responde con `success=false`. Si queda
+  como `done`, repetir la solicitud devuelve el fallo guardado y el reintento de D8.3 no
+  vuelve a ejecutar el paso que falló.
+
+**D10 · Nombres de tools en el esquema del intérprete: cadena libre** (2026-11-16)
+
+- **Decisión:** `operations[].tool` es una cadena libre que filtra el registro (D3, paso 1).
+  Si el filtro descarta algo y queda otra operación, la respuesta suma una línea fija:
+  "Parte de tu solicitud no corresponde a ninguna de mis herramientas." Si no queda nada, R1
+  responde con las capacidades.
+- **Motivo:** el esquema no crece con el catálogo (TASK.md línea 562), y una petición fuera
+  del catálogo no se fuerza a una tool cercana ni termina en "no te entendí" (líneas 107 y
+  128-132). Es la única opción compatible con el paso 1 de D3, que supone una cadena libre.
+- **Descartadas:** un enum cerrado generado del registro (un nombre desconocido es un
+  `ValidationError` y responde "no te entendí"); una cadena libre descartada en silencio (el
+  usuario no sabe que parte de su solicitud se ignoró).
+
+**D11 · Dos operaciones de la misma tool en un turno** (2026-11-16)
+
+- **Decisión:** si tras el filtro del registro un turno trae dos operaciones de la misma tool
+  ("avísale a Carlos por correo y a Ana por SMS"), el código no inicia ni fusiona nada, no
+  toca el estado y responde con una plantilla: "Puedo hacer una operación de cada tipo por
+  mensaje; ¿por cuál empiezo?". Vale igual si difieren en `certainty`.
+- **Motivo:** nunca ejecuta ni mezcla argumentos (TASK.md líneas 128-134 y 413) y evita
+  decidir qué paso recibe qué argumentos. Con D8.1 (una tool por paso), un plan nunca tiene
+  dos pasos de la misma tool.
+- **Descartadas:** quedarse con la primera, descartar las demás y avisarlo; juntarlas en una
+  sola operación (`explicit` si alguna lo es; argumentos de la primera), que mezcla
+  argumentos de dos solicitudes.
+
+**Enmienda a D2 y D3 (F0) · Corrida completa de la fase 0 condicionada a la cuota** (2026-11-16)
+
+- **Decisión:** la prueba de humo de 23 llamadas es obligatoria y se corre justo después del
+  primer turno completo. La corrida de 207 llamadas de D2 se hace solo si la cuota del día
+  alcanza al terminar los tests de los casos A–H. Si no se hace:
+  - el README dice que los umbrales de D2 se midieron solo con el humo;
+  - D3 conserva la marca "provisional" de la *Aclaración* y P1 se mantiene;
+  - el *Disparador para pasar a P2′* de D3 no se mide, porque necesita 81 corridas de los
+    escenarios claros.
+
+  Si se hace, D2 y D3 se aplican tal como están escritos.
+- **Motivo:** protege el plazo y la cuota de la capa gratuita sin perder la prueba temprana
+  del esquema que pide el repliegue de D1. La validación no depende del modelo (TASK.md
+  líneas 166-168) y el foco de la evaluación es la orquestación, no el modelo ni el prompt
+  (líneas 587 y 597). Es una desviación consciente del umbral de D2, no una decisión nueva:
+  el texto de D2 y D3 no se edita.
+- **Descartadas:** humo y corrida completa, las dos obligatorias (D2 tal como está escrito);
+  solo el humo, sin corrida completa en ningún caso.
+- **Pendiente:** el umbral de fallos de forma de D2 que activa el híbrido (≥ 3/207) no tiene
+  un equivalente fijado para las 23 llamadas del humo.
