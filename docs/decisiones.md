@@ -534,7 +534,8 @@ ejecuta una tool o qué se guarda se sigue consultando al autor.
 
 - **Decisión:** el validador es Python puro, corre después de la fusión de D4 y declara cada
   regla por tipo de campo en el registro. Devuelve faltantes, inválidos con su causa y los
-  valores normalizados que muestra la confirmación (D7).
+  valores normalizados que muestra la confirmación (D7). [`date` y `time` sin regla hasta la
+  09b; ver D44]
   - *D5.1 · Fechas:* `relative_days` y `weekday` se resuelven contra "hoy" (un día de la
     semana es su próxima ocurrencia, sin contar hoy); sin año, la próxima ocurrencia de ese
     día y mes; sin mes, el campo falta y se pregunta; un día que no existe es inválido.
@@ -888,6 +889,7 @@ orquestador; revisable
   campo con su `label` del registro, en el orden del registro, y no añade "(alta, media o
   baja)" a `priority` ni "(correo, SMS o push)" a `channel`. Esa misma pregunta se guarda en
   `last_question`. Lo prueba `test_missing_question_has_no_collected_value_and_no_options`.
+  [precisado en D43]
 - **Motivo:** la pregunta del caso B no lista opciones (TASK.md línea 319). `last_question`
   llega al intérprete en el resumen de D14; con las opciones a la vista, el modelo puede
   convertir "urgente" en "alta", lo que D2 descarta (líneas 166-168). Un valor fuera de la
@@ -919,7 +921,7 @@ autodecidida por el orquestador; revisable
   con `missing: []` y `last_question: None`, y responde con la plantilla provisional "Tengo
   los datos; la validación y la confirmación aún no están disponibles." Nada se ejecuta. La
   clave existe (D14) y el resumen escribe `none`. La tarea 09b lo reemplaza al crear
-  `awaiting_confirmation`.
+  `awaiting_confirmation`. [`awaiting_confirmation` nace en la 10a; ver D44]
 - **Motivo:** `last_question` es estado estructurado que el intérprete lee como la última
   pregunta al usuario (TASK.md líneas 216 y 229); guardar la plantilla provisional le
   mostraría algo que no es una pregunta.
@@ -1457,7 +1459,8 @@ orquestador; revisable
 - **Pendiente:** ningún test lo fija; las revisiones de la tarea 07 lo corrieron a mano. Las
   tareas 09b y 10a (caso G) lo tienen en cuenta. Vale mientras `last_question` no lleve valores
   (D2, D14): si la 09b guarda ahí la confirmación de D7.1 con los valores normalizados, el
-  modelo los vería y podría repetirlos.
+  modelo los vería y podría repetirlos. [la confirmación nace en la 10a y su pregunta guardada
+  no lleva valores; ver D43]
 
 **D39 · Fusión en el turno: cada `fill` se muestra antes de la pregunta** (2026-11-17) ·
 decidida por el autor
@@ -1574,4 +1577,99 @@ orquestador; revisable
 - **Pendiente:** D11.1 sigue sin implementar (tarea 08b): dos operaciones de la tool pendiente
   siguen con la pregunta de D11. Redacción, sin tarea (revisión de la tarea 08, nota 7): un
   valor que termina en punto da "..", la nota usa la grafía que llegó y un `relative_days`
-  negativo se muestra "-1 días desde hoy"; la 09a ya tiene el recorte de espacios.
+  negativo se muestra "-1 días desde hoy"; la 09a ya tiene el recorte de espacios. [recorte
+  de espacios resuelto en D44]
+
+**D43 · Precisa D17: la respuesta nombra los inválidos con sus valores; `last_question`, solo
+etiquetas** (2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** la respuesta de un turno de recopilación lleva, en este orden, las líneas de
+  cambio, nota y rechazo (D39), una línea por campo inválido y la pregunta. La línea de un
+  inválido puede listar los valores permitidos ("No reconozco la prioridad que indicaste; puede
+  ser baja, media o alta."). `last_question` guarda solo la pregunta (`missing_question`,
+  `core/replies.py`): nombra por su `label` los campos faltantes **e inválidos** de cada paso,
+  en el orden del registro, sin valores recopilados ni permitidos. Vale también para la 10a: la
+  pregunta de confirmación que se guarde tampoco lleva valores, aunque la respuesta los muestre.
+- **Motivo:** RF-06 pide identificar el problema y pedir la corrección (TASK.md líneas
+  186-200); ante "urgente" el usuario necesita saber qué puede escribir. El intérprete no ve la
+  respuesta (`include_contents='none'`, D2), solo `last_question` en el resumen de D14, así que
+  las opciones siguen fuera de su vista y el modelo no convierte "urgente" en "alta" (líneas
+  166-168 y 184).
+- **Lo que ve el usuario:** los valores permitidos aparecen solo cuando dio uno que no está en
+  la lista; la pregunta de faltantes sigue sin opciones (caso B, línea 319). Lo preveía la fila
+  09a del backlog; no cambia cuándo se ejecuta nada ni qué se guarda.
+- **Precisa D17:** reabre en parte su segunda descartada ("listarlas solo en la respuesta"):
+  las opciones van en la línea del inválido, nunca en la pregunta, y desde D39 `last_question`
+  ya no es todo lo que el usuario leyó. El texto de D17 no se edita.
+- **Precisa D38:** su condición ("vale mientras `last_question` no lleve valores") queda fijada
+  también para la confirmación de la 10a.
+- **Descartada:** listar las opciones dentro de la pregunta y guardarlas en `last_question` (la
+  primera descartada de D17).
+- **Lo prueban:** `test_invalid_and_missing_in_one_reply` y
+  `test_missing_question_has_no_collected_value_and_no_options` (que suma `X1`).
+
+**D44 · Tarea 09a: el validador por tipo de campo conectado al turno** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** `core/validation.py` (`validate(tool, args) -> Validation`, Python puro, sin
+  ADK) implementa D5 salvo fechas y horas, y `core/turn.py` lo llama por paso en R2 y tras cada
+  fusión de *Misma tool*. Solo la última línea toca lo que ve el usuario, y solo en redacción,
+  así que van en una línea cada una (regla del autor desde la tarea 07):
+  - *Registro:* `pending` gana `invalid: [{tool, field, cause}]`, sin valores; `missing` sigue
+    siendo solo lo ausente; `status` sigue en `collecting`. Los normalizados y `unchecked` no se
+    guardan: se recalculan (la 10a, para mostrar y para el hash de D7.2).
+  - *Causas:* `not_allowed` (una `word` sin sinónimo, "urgente"), `out_of_range` (un `int` fuera
+    de `int_range`) y `wrong_type` (cualquier tipo equivocado; un `bool` no es `int`, como D13).
+  - *Reglas:* una por `FieldKind` en `RULES`; `text` y `person` recortan espacios, `word` da el
+    valor canónico (`resolve_word`) y `person_list` recorta cada nombre. Cada campo pasa por
+    ausente → sin regla → regla de su tipo, en el orden del registro.
+  - *Parámetros:* `FieldSpec` gana `int_range` (`duration_minutes`: de 1 a 480, D5.3) y
+    `value_labels` (baja/media/alta; correo/SMS/push), que reusarán la 10a y la 10b. Ninguna
+    regla nombra una tool ni un campo (TASK.md línea 562). Precisa D5: las reglas viven por
+    tipo en `core/validation.py`; el registro declara el tipo y sus parámetros.
+  - *Fechas y horas:* presentes, quedan `unchecked`, nunca válidas, hasta la 09b; un paso
+    completo con una de ellas deja `last_question` nulo y cierra con la plantilla provisional
+    "Tengo los datos; todavía no puedo validar fechas ni horas en esta versión.".
+  - *Completo y válido:* `last_question` nulo y la plantilla de D19; nada se ejecuta (D7.1).
+  - *Log:* todo turno entendido suma `invalid=campo:causa`, sin valores ni tool, antes de
+    `changes=`, aun vacío. Sin la tool, dos pasos con un campo del mismo nombre no se
+    distinguen; lo decide la 14a.
+  - *Sin cambios:* un turno *Misma tool* que no cambia nada deja el estado igual (D42) y repite
+    las líneas de inválido guardadas y la pregunta.
+  - *Resumen del intérprete:* `pending_summary` sigue con sus cuatro claves (D14, D16) y no
+    muestra `invalid`, así que su `Missing fields` lista solo lo ausente mientras
+    `last_question` nombra también los inválidos. Es lo decidido, no una incoherencia: los
+    registros de la fase 0 (D27) siguen dando el resumen con el que se midió D32.
+  - *`missing_fields`:* se borra de `core/presence.py`; su test es ahora
+    `test_missing_comes_from_the_validator`.
+  - *Espacios (nota (hh)):* `show_value` recorta los de una cadena al mostrarla, como el
+    validador; `args` guarda el valor tal como llegó.
+  - *Redacción:* "No reconozco {etiqueta} que indicaste; puede ser {valores en español, con
+    'o'}.", "{Etiqueta} debe ser un número entre {mín} y {máx}." y "No pude leer {etiqueta}.";
+    por causa, nunca por tool, y sin el valor dado.
+  - *Inválido y `fill`:* un campo inválido conserva su línea "Anoté …" de D39 y después va su
+    línea de inválido ("Anoté la prioridad: urgente." y "No reconozco la prioridad que
+    indicaste; puede ser baja, media o alta."). Es D39 al pie de la letra y se lee algo raro;
+    cambia solo la redacción que ve el usuario, no cuándo se ejecuta nada ni qué se guarda.
+- **Motivo:** RF-04 pide validar presencia, tipos, valores permitidos y restricciones de
+  negocio de forma determinística (TASK.md líneas 151-168); RF-05, volver a validar tras cada
+  mensaje y no ejecutar ni inventar (líneas 174-184); RF-06, nombrar el problema (líneas
+  186-200), y RF-07, guardar el estado de validación (línea 218). Por D4 regla 7 la fusión
+  guarda las palabras del usuario y el validador las reporta.
+- **Precisa D19:** una reunión completa cierra con la plantilla de fechas, no con la de D19, y
+  `awaiting_confirmation` lo crea la 10a, no la 09b. El texto de D19 no se edita.
+- **Precisa D41:** la línea de D10 también precede a la plantilla de fechas; ningún test lo
+  fija, y la 10a y la 12 lo deciden.
+- **Lo prueban:** los nueve de `tests/test_validation.py`, `test_invalid_and_missing_in_one_reply`,
+  `test_correction_clears_invalid`, `test_duration_out_of_range`,
+  `test_repeated_invalid_request_changes_nothing`, `test_complete_meeting_waits_for_dates`,
+  `test_show_value_trims_spaces`, `test_value_labels_and_int_ranges_are_declared_per_field`,
+  `test_invalid_word_through_the_node` y `test_complete_meeting_does_not_reach_confirmation`.
+- **Pendiente:** un "sí" con faltantes o inválidos responde la plantilla provisional sin tocar
+  el estado, no la pregunta que pide D7.1; la 10a lo cambia y repite también las líneas de
+  inválido (revisión de la tarea 09a, ronda 2, nota 1). La confirmación y el hash de D7.2 deben
+  salir de `validate(...).normalized`, nunca de `args`, que conserva " Carlos " (nota 3). El
+  caso D sigue sin cumplirse hasta la 09b ("40 de noviembre a las 25:90" se anota y no se
+  reporta; TASK.md líneas 159, 163 y 365-371), que además quita el `validate` repetido de
+  `_closing_line`. `test_complete_meeting_does_not_reach_confirmation` solo puede fallar desde
+  la 10a: hoy nada crea `awaiting_confirmation` (ronda 1, nota 3).
