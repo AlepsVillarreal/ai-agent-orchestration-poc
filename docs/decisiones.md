@@ -1730,7 +1730,7 @@ autodecidida por el orquestador; revisable
   puro y se prueban sin Redis (TASK.md líneas 270, 286, 558 y 568-570).
 - **Costo aceptado:** el núcleo es síncrono, así que la variante Redis de la 11 usará el cliente
   síncrono de redis-py dentro de un nodo async (milisegundos, en una CLI de un usuario); la
-  brief 11 lo confirma.
+  brief 11 lo confirma. [resuelto en D62]
 - **Descartadas:** que el núcleo devuelva una orden (`to_execute`) y el nodo llame al mock y
   vuelva a llamar al núcleo con el resultado; esconder la llamada tras una bandera hasta la 10b
   (una plantilla provisional más que la 10b tiraría); agregar `executions` ya en la 10a (nada
@@ -1740,9 +1740,9 @@ autodecidida por el orquestador; revisable
   `grep -rn "\.execute(" core assistant` da solo `_run_confirmed`.
 - **Pendiente:** hasta la 11 no hay idempotencia: una solicitud idéntica repetida después de
   ejecutarse vuelve a pedir confirmación y, con otro "sí", ejecuta de nuevo (D9.1; TASK.md
-  líneas 443-449). `_run_confirmed` no corta en un fallo, vacía `pending` sin mirar `success` y
+  líneas 443-449) [resuelto en D62 y D63]. `_run_confirmed` no corta en un fallo, vacía `pending` sin mirar `success` y
   no captura una excepción de la tool; las tareas 11 y 14b lo cambian antes de un plan de dos
-  pasos (TASK.md línea 270; revisión de la tarea 10a, ronda 2, nota 5). Sin `history` (D6) ni
+  pasos (TASK.md línea 270; revisión de la tarea 10a, ronda 2, nota 5) [resuelto en D60 y D63]. Sin `history` (D6) ni
   respuesta propia del resultado (línea 246): tarea 10b. [resuelto en D48 y D49]
 
 **D47 · Tarea 10a: confirmación y "sí" en el turno** (2026-11-17) · autodecidida por el
@@ -1842,7 +1842,7 @@ orquestador; revisable
 - **Lo prueban:** `test_result_line_per_tool`, `test_result_line_reads_the_registry_id_field`
   (una tool falsa con `result_id_field` propio), `test_yes_reply_reads_the_result`,
   `test_case_g_through_the_node` y `test_case_b_through_the_node`.
-- **Pendiente:** "Listo" no mira `success` (D50, *Pendiente*).
+- **Pendiente:** "Listo" no mira `success` (D50, *Pendiente*). [resuelto en D60]
 
 **D49 · Forma de `history` y cómo llega al núcleo** (2026-11-17) · autodecidida por el
 orquestador; revisable
@@ -1877,7 +1877,7 @@ orquestador; revisable
   `test_case_b_through_the_node`, `test_case_g_through_the_node` y
   `test_confirmed_operation_is_gone_after_reload` (una instancia nueva de `RedisSessionService`
   recarga `history`; línea 227).
-- **Pendiente:** el `completed` no mira `success` (D50, *Pendiente*).
+- **Pendiente:** el `completed` no mira `success` (D50, *Pendiente*). [resuelto en D59 y D60]
 
 **D50 · Tarea 10b: resultado, `history` y log** (2026-11-17) · autodecidida por el orquestador;
 revisable
@@ -1888,7 +1888,7 @@ revisable
   - *Log (precisa D21 y D42):* un turno que ejecuta suma `results=tool:ID` (uno por paso,
     separados por coma) después de `route=`; solo aparece si corrió una tool. El ID lo da la
     tool, no el usuario, y se escribe como `str(result[id_field])`. La 11 le suma el estado y la
-    clave.
+    clave. [resuelto en D63]
   - *`TurnOutcome`:* gana `results: list[tuple[str, str]]`, `(tool, ID)` por paso, para el log.
   - *Fijo `B4`:* "Sí, créalo" como `confirm` sin operaciones y con `confirms_tool="create_ticket"`,
     igual que `G2` volvió del modelo real (D32); así el caso B termina con su propio "sí" por el
@@ -1896,6 +1896,7 @@ revisable
     `tests/interpretations.py`.
   - *`values`:* es el mismo dict que recibió la tool; los mocks no lo mutan.
   - *`result`:* se guarda tal cual; tiene que poder serializarse en JSON (la 11 puede vigilarlo).
+    [resuelto en D60]
   - *Tools falsas de los tests:* sus `done_phrase` son "hice algo", "pedí la revisión" y
     "reservé la sala".
 - **Motivo:** la línea de log es la vía de observabilidad que TASK.md línea 471 pide justificar,
@@ -1913,15 +1914,16 @@ revisable
     devuelven `success: True`). Lo resuelve la 11: el fallo de ejecución, el plan que se
     detiene y el registro de ejecuciones (D8.3, D9, D9.3; TASK.md líneas 24-25, 246 y 270). La
     frase de defensa de la brief 10b ("el código lee `success`") no es cierta en la 10b: hoy lee
-    solo el ID que declara el registro.
+    solo el ID que declara el registro. [resuelto en D60]
   - *Excepción de una tool:* si una tool lanza, ni `pending` ni `history` se escriben y, con dos
     pasos, el primero ya habría corrido (líneas 270 y 286). Hoy no se alcanza (un solo paso: D11,
     R3); las tareas 11 y 14b escriben el cierre parcial con `closed_entry` antes de permitir un
-    plan de dos pasos (revisión de la tarea 10b, ronda 2, nota 5).
+    plan de dos pasos (revisión de la tarea 10b, ronda 2, nota 5). [resuelto en D60 y D63]
   - *ID del log:* `results` lee el ID por segunda vez en `_run_confirmed` y ningún test con una
-    tool falsa lo fija (ronda 2, nota 1); puede ir con la 11, que toca ese bucle.
+    tool falsa lo fija (ronda 2, nota 1); puede ir con la 11, que toca ese bucle. [resuelto en
+    D63]
   - *Tamaño:* `core/turn.py` tiene 425 líneas (ronda 2, nota 2).
-  - Sin idempotencia tras ejecutar (D46, *Pendiente*; tarea 11).
+  - Sin idempotencia tras ejecutar (D46, *Pendiente*; tarea 11). [resuelto en D62 y D63]
 
 **D51 · Tarea 10c: dos rondas como mucho, 10 llamadas y 30 peticiones** (2026-11-17) ·
 decidida por el autor
@@ -2303,6 +2305,263 @@ autodecidida por el orquestador; revisable
   - *Reloj del nodo:* ningún test lo fija; la única mutación que sobrevive a la revisión es un
     `now` fijo en el nodo, y solo la vigila el grep (revisión de la tarea 09b, ronda 3, nota 5).
     La cerraría un test que parchee `datetime` en `assistant.agent` y pase "mañana" por el
-    `Runner`.
+    `Runner`. [resuelto en D63]
   - *Tamaño:* `core/turn.py` tiene 510 líneas (tarea 15) y `core/validation.py`, 263 (ronda 3,
     nota 7).
+
+**D59 · Cada paso de `history` dice qué pasó: `outcome`, `result` y `error`** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** cada paso de una entrada de `history` (D49) es `{tool, values, outcome, result}`
+  (`step_entry`, `core/history.py`), más `error` tras una excepción. `outcome` es `ran` (la tool
+  corrió y respondió un éxito con su ID), `reused` (la misma ejecución ya estaba hecha: el
+  resultado guardado bajo la clave, sin ejecutar; D9.1), `failed` (`success` falso; D9.3) o
+  `uncertain` (D9.2, D60). `result` es el dict de la tool (el guardado si `reused`, el del fallo
+  si `failed`) o nulo si no hay uno legible; `error` es el nombre del tipo de la excepción, nunca
+  su texto. El `status` de la entrada sale de sus pasos (`closed_status`): `completed` si todos
+  son `ran` o `reused`; si no, el `outcome` del paso que cortó. Solo se listan los pasos
+  intentados. Decisión A de la brief 11, opción (a).
+- **Lo que se guarda:** desde la 11, todo cierre de un "sí" va a `history` como `completed`,
+  `failed` o `uncertain`, con la marca de cada paso. Ninguna regla la lee (D6) y el modelo no la
+  ve (D14). El usuario no ve nada de ella.
+- **Motivo:** RF-07 pide mantener el estado de ejecución y los resultados de las tools (TASK.md
+  líneas 220-222). Un `status` por registro no distingue, en un plan, un paso reutilizado de uno
+  que corrió, que es lo que D9.3 describe para el reintento ("el paso 1 encuentra `done` … y la
+  notificación corre de nuevo"; líneas 270-272). La 14b lo reusa sin cambiarlo.
+- **Precisa D49:** sus pasos `{tool, values, result}` ganan `outcome` y, tras una excepción,
+  `error`; `result` puede ser nulo. El texto de D49 no se edita.
+- **Descartadas:** (b) solo `reused: true` en los pasos reutilizados (no distingue un paso fallido
+  de uno incierto dentro de un plan); (c) un `status` nuevo, `duplicate`, sin marca por paso (no
+  sirve a un plan con un paso reutilizado y otro ejecutado).
+- **Lo prueban:** `test_confirmed_operation_goes_to_history` (ahora con `"outcome": "ran"`),
+  `test_case_h_same_request_after_running` (dos entradas `completed`, la segunda con el paso
+  `reused` y el mismo `result`), `test_started_without_done_is_uncertain`,
+  `test_failed_result_releases_the_key` y `test_steps_after_one_that_does_not_complete_never_run`.
+- **Pendiente:** la 14b decide cómo se ven los pasos no intentados de un plan, que hoy no se
+  listan.
+
+**D60 · Solo un éxito legible cierra `done`; una excepción o un resultado mal formado es
+`uncertain`** (2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** `classified` (`core/executions.py`) lee la respuesta de la tool una sola vez y da
+  su `outcome` y su ID:
+  - *`ran`:* `success` exactamente `True` y un ID no vacío tras quitar espacios en el campo que
+    declara el registro; la clave pasa a `done` con el resultado (`settled`).
+  - *`failed`:* `success` exactamente `False`; la clave se borra (D9.3).
+  - *`uncertain`:* cualquier otra cosa: una excepción de la tool (`TimeoutError`, `RuntimeError`
+    y también el `ValidationError` del contrato del mock, D12), un resultado sin `success`, con
+    `success: True` sin ID o con un ID vacío o en blanco, uno que no es dict o uno que no pasa por
+    `json.dumps`. La clave queda `started` y nada se reejecuta (D9.2). Un resultado que no es
+    dict o no es JSON se guarda en `history` como nulo.
+  - *Clave ya guardada:* un `done` cuyo resultado no se lee como `ran` también es `uncertain`
+    (`from_stored`).
+
+  Decisión B de la brief 11, opción (a), con dos ajustes de la revisión de la tarea 11: el ID
+  vacío (ronda 1, nota 3) y el resultado que no es JSON (ronda 1, should-fix 1).
+- **Lo que ve el usuario:** donde antes una excepción reventaba el turno con una traza y sin
+  escribir `pending` ni `history` (D50, *Pendiente*), ahora recibe la plantilla de estado
+  incierto (D61), `pending` se vacía y el cierre va a `history`. Un "Listo: … None." ya no es
+  posible.
+- **Motivo:** es la mecánica literal de D9.2: sin `done` no se sabe si el efecto ocurrió, y ante
+  la duda se ejecuta a lo más una vez (TASK.md líneas 286, 451 y 580). Solo un fallo que la tool
+  declara dice que nada ocurrió, y solo ese libera la clave (D9.3; líneas 270-272). La respuesta,
+  `history` y el log usan el ID de esa única lectura.
+- **Precisa D9.2, D9.3 y D12:** D9.2 nombra "caída o timeout"; aquí cuenta toda excepción y todo
+  resultado ilegible. D9.3 libera la clave con `success=false`; un `success: False` que no es
+  JSON queda `uncertain` y su clave no se libera, porque la comprobación de JSON va primero
+  (inalcanzable con los mocks; revisión de la tarea 11, ronda 2). Un `ValidationError` del
+  contrato, que D12 quiere ver fallar, no revienta el turno: cierra `uncertain`, con
+  `tool_error=ValidationError` en el log y `error` en `history`. El texto de D9.2, D9.3 y D12 no
+  se edita.
+- **Descartadas:** (b) que una excepción libere la clave como un fallo (repetir reejecuta, con
+  riesgo de duplicado si el efecto ocurrió; contra D9.2); (c) dejar salir la excepción, como hasta
+  la 10b (el turno falla sin escribir nada, la clave queda `started` y el usuario ve una traza).
+- **Lo prueban:** `test_malformed_result_is_not_a_success` (11 formas: sin ID, ID nulo, vacío o en
+  blanco, un `datetime` dentro, sin `success`, `success` `"yes"` o `1`, un texto, `None`, y
+  `{"success": False}` sin ID, que es `failed`), `test_timeout_is_uncertain_and_never_retried`
+  (`TimeoutError` y `RuntimeError`), `test_started_without_done_is_uncertain`,
+  `test_failed_result_releases_the_key` y `test_results_read_the_registry_id_field` (`.get` y
+  `[]` contados: una sola lectura).
+- **Pendiente** (limitaciones para las tareas 14b y 19):
+  - *`ValidationError` del contrato:* se sabe que nada corrió y aun así la clave queda `started`
+    24 h y el usuario lee "No pude confirmar…". Es inalcanzable (los valores ya pasaron el
+    validador); la 14b lo vuelve a mirar si añade el `ticket_id` al `message` después de validar
+    (revisión de la tarea 11, ronda 1, nota 9).
+  - *Un `done` ilegible:* la rama de `from_stored` que lo da por `uncertain` no tiene test (ronda
+    2, nota 2).
+  - *Resto en Redis:* un resultado JSON que Redis no puede codificar en UTF-8 (un sustituto
+    suelto, `"\ud800"`) lanza en `complete`, después de que la tool corrió: el turno revienta sin
+    escribir `pending` ni `history`, la clave queda `started` y el "sí" siguiente da `uncertain`
+    (ronda 2, nota 1). Es el límite de un error de Redis a mitad del turno (D62).
+
+**D61 · Redacción de las respuestas tras un "sí": reutilizado, fallido e incierto** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** `step_line` (`core/replies.py`) escribe una línea por paso intentado, con frases
+  del registro y sin el `message` de la tool (D48):
+  - `ran`: "Listo: {done_phrase} {ID}." (`result_line`, el mismo texto de D48);
+  - `reused`: "Ya {done_phrase} {ID} con estos mismos datos; no lo repetí.";
+  - `failed`: "No pude {action_phrase}: la herramienta respondió con un error. Si me lo pides de
+    nuevo, lo intento otra vez.";
+  - `uncertain`: "No pude confirmar si llegué a {action_phrase}; no lo voy a reintentar para no
+    duplicarlo."
+
+  `result_line` recibe el ID ya leído (`result_line(tool, result_id)`), no el resultado.
+  Decisión C de la brief 11.
+- **Lo que ve el usuario:** "Ya creé el ticket TCK-… con estos mismos datos; no lo repetí." al
+  confirmar otra vez una solicitud ya ejecutada; "No pude crear un ticket: la herramienta
+  respondió con un error. …" con `MOCK_FAIL`; "No pude confirmar si llegué a crear un ticket; no
+  lo voy a reintentar para no duplicarlo." tras una excepción o con la clave `started`. Solo
+  cambia la redacción; el contenido lo fijan D9.1–D9.3.
+- **Motivo:** D9.1 manda devolver el resultado guardado, D9.2 decir que no se pudo confirmar y que
+  no se reintentará, y D9.3 que repetir la solicitud la ejecuta; el agente da feedback del
+  resultado y del error (TASK.md líneas 24, 246, 497 y 499). Las frases salen del registro, no de
+  un nombre de tool (línea 562), y no llevan género gramatical: con `short_name`, "Ese ticket ya
+  existía" daría "Ese reunión".
+- **Precisa D9.1:** su ejemplo "Ese ticket ya existía: TCK-0001" se dice "Ya creé el ticket
+  TCK-0001 con estos mismos datos; no lo repetí.". El texto de D9.1 no se edita.
+- **Lo prueban:** `test_case_h_same_request_after_running`, `test_case_h_through_the_node`,
+  `test_failed_result_releases_the_key`, `test_started_without_done_is_uncertain`,
+  `test_timeout_is_uncertain_and_never_retried`, `test_result_line_per_tool` y
+  `test_result_line_reads_the_registry_id_field`.
+- **Pendiente:** la redacción del reporte de un plan con un paso hecho y otro fallido es de la 14b
+  (TASK.md línea 268); hoy serían dos líneas, "Listo: …" y la de fallo.
+
+**D62 · Registro de ejecuciones: la clave, Redis y la variante en memoria** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** decisión D de la brief 11, con una desviación del implementador (*Redis*, más
+  abajo):
+  - *Clave:* `execution_key` es el sha256 del JSON canónico (`sort_keys`, `ensure_ascii=False`) de
+    `[session_id, tool, normalized]`, como `confirmation_hash` (D47). `normalized` son los valores
+    que cubre el hash de D7.2 y que recibe la tool (D46).
+  - *Protocolo* (`Executions`, `core/executions.py`, sin redis ni ADK): `reserve(key)` devuelve
+    `None` si la reservó ahora y, si no, lo guardado (`started`, o `done` con el resultado), sin
+    cambiar nada; `complete(key, result)`; `release(key)`. El registro no tiene reglas: las de
+    D9 están en el núcleo (`_run_confirmed`, `settled`, `from_stored`; D46). Un valor guardado
+    ilegible cuenta como `started`.
+  - *Redis* (`RedisExecutions`, `assistant/executions.py`, cliente síncrono de redis-py): clave
+    `idem:<hex>` con valor JSON. `reserve` es `SET NX GET EX 86400`, una sola orden atómica
+    (Redis ≥ 7.0): no hay hueco en el que la clave venza o se libere entre `SET NX` y `GET`, y
+    dos turnos nunca reservan la misma clave. `complete` es `SET XX EX 86400`: las 24 h cuentan
+    desde que la tool terminó y nunca revive una clave liberada o vencida. `release` es `DEL`.
+    Un error de Redis no se captura: llega al turno como cualquier error de infraestructura.
+  - *En memoria* (`InMemoryExecutions`): un dict que guarda JSON (lo que devuelve es una copia, y
+    un resultado que no es JSON falla como en Redis), con `complete` como `SET XX` y sin
+    vencimiento.
+  - *Quién usa cuál:* la CLI pasa `RedisExecutions` sobre un cliente síncrono del mismo
+    `REDIS_URL` que las sesiones, cerrado al salir; `build_root_agent` sin `executions` crea uno
+    en memoria por agente construido (el `app` del módulo, que usa `adk web`, y cada runner de
+    test); `handle_turn` sin `executions` usa uno de usar y tirar por llamada.
+- **Lo que se guarda:** en la CLI, una clave `idem:` por paso ejecutado, en el mismo Redis que las
+  sesiones y fuera de `session.state`, con TTL de 24 h. `docker compose down -v` la borra junto
+  con las sesiones.
+- **Motivo:** D9.1 pone el registro en Redis porque el estado solo se escribe con el evento final
+  (D1.1) y una caída entre la tool y ese evento lo perdería (TASK.md líneas 286, 443-449 y 558).
+  Con el cliente síncrono el núcleo sigue síncrono y en Python puro (D46, *Costo aceptado*, que la
+  brief 11 confirma). La variante en memoria deja probar D9.1–D9.3 sin Redis (línea 522) y sirve
+  a `adk web`, cuyas sesiones tampoco viven en Redis.
+- **Precisa D9.1, D9.2 y D46:** D9.1 dice "registro en Redis"; con `adk web` el registro vive en
+  memoria, no vence y se pierde al reiniciar, así que ahí la clave de D9.2 no "expira con el TTL".
+  D46 decía "reserva con `SET NX`". El texto de D9.1, D9.2 y D46 no se edita.
+- **Descartadas:** `SET NX` seguido de `GET` (la clave puede vencer o liberarse entre las dos
+  órdenes); un registro en memoria compartido por todos los agentes del proceso (los tests
+  compartirían claves).
+- **Lo prueban:** `test_execution_key_binds_session_tool_and_values`,
+  `test_in_memory_reserve_complete_release`, `test_complete_never_brings_back_a_released_key`,
+  `test_an_unreadable_record_counts_as_started`, `test_redis_executions_reserve_is_set_nx_with_ttl`
+  (`NX`, `XX`, TTL en (0, 86400], prefijo, y otra instancia con un cliente nuevo ve `done`),
+  `test_resent_yes_survives_a_new_process`, `test_same_values_in_another_session_run_again`,
+  `test_without_executions_each_call_has_its_own_registry` y
+  `test_cli_uses_the_redis_registry_and_mock_fail`.
+- **Pendiente** (limitaciones para la tarea 19):
+  - *Sesión, no app ni usuario:* la clave lleva el id de sesión, y ADK identifica una sesión por
+    app, usuario e id. En la CLI el usuario es fijo (D24); con `adk web`, dos usuarios con el
+    mismo id de sesión compartirían claves (revisión de la tarea 11, ronda 1, nota 8).
+  - *En memoria:* no vence y se pierde al reiniciar; un `uncertain` bloquea esa ejecución hasta
+    reiniciar el proceso.
+  - *Un `uncertain` bloquea 24 h en la CLI:* la misma solicitud, con los mismos valores en la misma
+    sesión, responde "No pude confirmar…" hasta que la clave vence; hay que cambiar algún valor,
+    como en la limitación de D9.
+  - *Error de Redis:* si Redis cae después de que la tool corrió, la clave queda `started`, el
+    turno falla sin escribir `pending` ni `history`, y el "sí" siguiente da `uncertain` (D9.2).
+  - *Sin test:* que la CLI cierre el cliente síncrono al salir (ronda 2, nota 5) y que cada
+    `build_root_agent` cree el suyo (no verificado por mutación); dos procesos sobre la misma
+    clave se apoyan en la atomicidad de `SET NX GET`, sin prueba de carrera.
+
+**D63 · Tarea 11: idempotencia en el turno, `MOCK_FAIL` y log** (2026-11-17) · autodecidida por
+el orquestador; revisable
+
+- **Decisión:** la 11 cierra D9.1–D9.3 y la parte de D8.3 que no es del plan con D59–D62. Los
+  demás detalles no cambian lo que ve el usuario, cuándo se ejecuta una tool ni qué se guarda,
+  así que van en una línea cada uno (regla del autor desde la tarea 07):
+  - *`_run_confirmed`:* sigue siendo el único `.execute(` (D46). Por cada paso calcula la clave y
+    la reserva; con la clave nueva llama a la tool dentro de `try/except Exception`, y con una ya
+    guardada no llama. Corta en el primer paso que no termina `ran` o `reused` (D8.1; TASK.md
+    línea 270), vacía `pending` en todo cierre y agrega la entrada a `history` (D6).
+  - *`_confirm`:* devuelve `None` para decir "ejecutar" y `_decide` llama a `_run_confirmed`; el
+    orden de sus comprobaciones (D45, D7.4, D38, D7.1, D47, D55) no cambia. Desviación del
+    implementador, para no pasar `history` y `executions` por `_confirm`.
+  - *`session_id` (decisión E; precisa D42):* `TurnInput` gana `session_id: str`, obligatorio y
+    sin valor por defecto, como `now` (D58): un `session_id` olvidado haría que dos sesiones
+    compartieran claves en silencio. El nodo lo toma de `ctx.session.id`; los tests usan
+    `SESSION = "s-test"` (`tests/interpretations.py`). Descartado: un valor por defecto `""`.
+  - *Fallo simulado (decisión F; D8.3):* `simulated(contract, id_field, "failure" | "timeout")`
+    (`core/mock_tools.py`) valida el contrato y responde `{"success": False, <ID>: None,
+    "message": …}` o lanza `TimeoutError`. Los tres mocks por defecto no cambian y el núcleo no lee
+    variables de entorno.
+  - *`MOCK_FAIL` (decisión F; precisa D24):* la CLI lo lee tras comprobar Redis y
+    `GOOGLE_API_KEY`, justo antes de armar el agente. Son nombres de tool separados por coma, que
+    pasan a su variante de fallo en el `TOOLS` de su proceso, con un aviso en stderr ("MOCK_FAIL:
+    create_ticket responderán con un fallo."). Un nombre desconocido sale con código 1 y
+    "MOCK_FAIL nombra herramientas que no existen: …", sin traza. Solo fallo, no timeout: el
+    estado incierto se prueba en los tests.
+  - *Log (decisión G; precisa D50):* `results=` pasa a `tool:ID:outcome` por paso intentado (`ID`
+    es `-` si no hay); después va `idem=` con la clave de cada paso, en el mismo orden, y
+    `tool_error=<Tipo>` si una tool lanzó. `tool_error` es una clave propia, porque `error=` ya es
+    el fallo del modelo (D21); solo el último paso intentado puede llevarla. La clave de
+    idempotencia es un hash, no un valor del usuario.
+  - *`route`:* sigue en `confirmed` también con `failed` y `uncertain`; el resultado de cada paso
+    va en `results=`.
+  - *`TurnOutcome.results`:* lista de `StepRun` (`tool`, `values`, `key`, `outcome`, `result`,
+    `result_id`, `error`), que usan la respuesta, `history` y el log.
+  - *CLI:* arma su propio `App(name=APP_NAME, root_agent=…)` con el registro de Redis; el `app` del
+    módulo sigue siendo el que encuentra `adk web`.
+- **Lo que ve el usuario (caso H, TASK.md líneas 441-451):** con la operación pendiente, repetir la
+  solicitud no cambia nada y repite la pregunta o la confirmación (D9, D40, D47). Ya ejecutada, la
+  misma solicitud abre una confirmación nueva, con otro `operation_id`, y su "sí" responde "Ya
+  creé el ticket … con estos mismos datos; no lo repetí." con el mismo ID, sin ejecutar. Un "sí"
+  reenviado tras un turno que no se guardó encuentra `done` y tampoco ejecuta, aun desde otro
+  proceso. Con la clave `started`, una excepción o un resultado ilegible, la respuesta dice que no
+  se pudo confirmar y que no se reintentará; con `success=false`, que falló y que pedirlo de nuevo
+  lo intenta otra vez.
+- **Motivo:** TASK.md pide evitar duplicados ante reintentos o mensajes repetidos con un mecanismo
+  de idempotencia (líneas 286 y 443-449), manejar errores y ejecuciones duplicadas (línea 25), dar
+  feedback del resultado (líneas 24 y 246) y no ejecutar la segunda tool si falla la primera
+  (línea 270). El log suma lo que se ejecutó y su clave (línea 471). Las reglas viven en el núcleo
+  y se prueban sin Redis; el nodo solo pasa el registro (D46; líneas 568-570).
+- **Resuelve:** el *Pendiente* de D46 (idempotencia, corte en un fallo y excepción de una tool),
+  los de D48, D49 y D50 (`success`, la excepción, el ID leído dos veces y la idempotencia; con
+  D60 también el `result` serializable) y el *Reloj del nodo* de D58
+  (`test_node_passes_session_and_clock`).
+- **Lo prueban:** `test_case_h_repeated_while_pending`, `test_case_h_same_request_after_running`,
+  `test_resent_yes_after_unsaved_turn`, `test_steps_after_one_that_does_not_complete_never_run`
+  (fallo y timeout), `test_simulated_failure_and_timeout`, `test_case_h_through_the_node`
+  (sesiones `s-h` y `s-h2`; la línea de log del cuarto turno con `:reused` e `idem=`),
+  `test_node_passes_session_and_clock` (`session_id` y el reloj parcheado en `assistant.agent`),
+  `test_log_line_of_a_failed_and_an_uncertain_step`, `test_case_g_through_the_node` y
+  `test_case_b_through_the_node` (con `results=…:ran idem=…`),
+  `test_cli_uses_the_redis_registry_and_mock_fail` y
+  `test_cli_exits_clearly_with_an_unknown_mock_fail`; `grep -rn "\.execute(" core assistant` da
+  solo `_run_confirmed`, y `core/` no importa `redis` ni lee `MOCK_FAIL`.
+- **Pendiente:**
+  - *Explicación escrita (tarea 19):* qué hace el sistema cuando no puede saber si una ejecución
+    terminó (TASK.md línea 451) y las preguntas 6 y 7 de §9 (líneas 558 y 559), con este
+    mecanismo y los límites de D60 y D62; que el duplicado se detecta al ejecutar, después del
+    "sí" (D9, *Limitaciones*).
+  - *Plan (14b):* el reporte del fallo parcial, el `ticket_id` en el `message` y la clave del paso
+    2 calculada antes de añadirlo; la costura ya corta en el primer paso no hecho y marca cada
+    paso (D59).
+  - *`MOCK_FAIL` con el modelo real:* solo se probó por `_run` con el modelo falso; `adk web` con
+    el registro en memoria no se lanzó.
+  - *Tamaño:* `core/turn.py` tiene 532 líneas (tarea 15).
