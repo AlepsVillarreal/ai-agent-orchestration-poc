@@ -20,7 +20,7 @@ ONE_PER_TOOL = "Puedo hacer una operación de cada tipo por mensaje; ¿por cuál
 # D3 gate, step 4: a confirmation, rejection or bare data with nothing pending (TASK.md line 284).
 NO_PENDING_OPERATION = "No hay ninguna operación pendiente."
 
-# Provisional: steps 2 and 3 of the D3 gate (tasks 08, 10a, 12 and 13 replace it).
+# Provisional: steps 2 and 3 of the D3 gate that are not built yet (tasks 12 and 13 replace it).
 PENDING_NOT_SUPPORTED_YET = "Todavía no puedo continuar esa operación en esta versión."
 
 # Provisional: rules R3, R4 and R5 (tasks 13 and 14a replace it).
@@ -37,11 +37,6 @@ MODEL_UNAVAILABLE = (
 
 # D4 rule 9: a name not written in the message was dropped. Fixed, so it never shows the name.
 REJECTED_NAME_LINE = "No tomé en cuenta un nombre que no aparece escrito en tu mensaje."
-
-# Provisional: a request that arrives with every field (task 09b replaces it).
-READY_NOT_AVAILABLE_YET = (
-    "Tengo los datos; la validación y la confirmación aún no están disponibles."
-)
 
 # Provisional: every field is in, but a date or a time has no rule yet (task 09b replaces it).
 # It names no tool, so it holds for any step with a `date` or `time` field.
@@ -85,8 +80,50 @@ def invalid_line(spec: FieldSpec, cause: Cause) -> str:
         return f"No reconozco {spec.label} que indicaste; puede ser {options}."
     if cause == "out_of_range" and spec.int_range is not None:
         low, high = spec.int_range
-        return f"{spec.label[:1].upper()}{spec.label[1:]} debe ser un número entre {low} y {high}."
+        return f"{_capitalized(spec.label)} debe ser un número entre {low} y {high}."
     return f"No pude leer {spec.label}."
+
+
+def confirmation_summary(shown: list[dict[str, Any]]) -> str:
+    """D7.1: the normalized values of each step, the ones the hash binds (D7.2).
+
+    One header per step with the action phrase, then one line per field with its label, in
+    registry order. A `word` value is shown by its Spanish label ("alta", "correo"), never by the
+    canonical value the tool receives ("high", "email").
+    """
+    lines = []
+    for step in shown:
+        tool = TOOLS[step["tool"]]
+        values = step["normalized"]
+        lines.append(f"Voy a {tool.action_phrase} con estos datos:")
+        lines += [
+            f"- {_capitalized(spec.label)}: {_normalized_value(spec, values[spec.name])}"
+            for spec in tool.fields
+            if spec.name in values
+        ]
+    return "\n".join(lines)
+
+
+def confirmation_question(tools: list[ToolSpec]) -> str:
+    """D7.1 and D43: the question stored as `last_question` while awaiting confirmation.
+
+    It names the action only, never a value (collected or allowed): the interpreter reads it in
+    the pending summary (D2, D14), and a value it saw could come back in a "yes" (D38).
+    """
+    actions = join_es([tool.action_phrase for tool in tools])
+    return f"¿Confirmas que quieres {actions}? Responde sí o no."
+
+
+def _normalized_value(spec: FieldSpec, value: Any) -> str:
+    if spec.kind == FieldKind.WORD:
+        return spec.value_labels.get(value, value)
+    if spec.kind == FieldKind.PERSON_LIST:
+        return join_es(value)
+    return str(value)
+
+
+def _capitalized(text: str) -> str:
+    return f"{text[:1].upper()}{text[1:]}"
 
 
 def show_value(spec: FieldSpec, value: Any) -> str:

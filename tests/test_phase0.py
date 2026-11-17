@@ -33,6 +33,12 @@ def _core_record(key: str) -> dict:
     ).state_delta["pending"]
 
 
+def _without_id(record: dict) -> dict:
+    """Task 10a: every record R2 creates has a new random `operation_id`, and phase0 builds its
+    records at import time, so two calls never share it. The summary never reads it (D14)."""
+    return {key: value for key, value in record.items() if key != "operation_id"}
+
+
 def _string_values(value: Any) -> set[str]:
     if isinstance(value, str):
         return {value}
@@ -64,9 +70,9 @@ def test_the_23_scenarios_of_d2():
     assert {s.id for s in SCENARIOS if s.pending is not None} == SECOND_MESSAGES
 
     # From the core: the record `handle_turn` creates for the first message.
-    assert BY_ID["B2"].pending == _core_record("B1")
+    assert _without_id(BY_ID["B2"].pending) == _without_id(_core_record("B1"))
     for key in ("F2", "L1", "L2", "L3", "L4"):
-        assert BY_ID[key].pending == _core_record("F1"), key
+        assert _without_id(BY_ID[key].pending) == _without_id(_core_record("F1")), key
         assert BY_ID[key].pending["status"] == "collecting"
 
     # Literals, with no collected value.

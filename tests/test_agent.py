@@ -78,6 +78,11 @@ def a1_record() -> dict:
     return handle_fixed(None, "A1").state_delta["pending"]
 
 
+def without_id(record: dict) -> dict:
+    """A record without its `operation_id`, a new uuid on every `handle_turn` call (task 10a)."""
+    return {key: value for key, value in record.items() if key != "operation_id"}
+
+
 def make_runner(fake, sessions=None) -> tuple[Runner, InMemorySessionService]:
     sessions = sessions or InMemorySessionService()
     app = App(name="assistant", root_agent=build_root_agent(build_interpreter(fake)))
@@ -114,7 +119,7 @@ async def test_case_a_end_to_end_through_the_node(monkeypatch):
     assert len(answers) == 1
     assert event_text(answers[0]) == expected.reply
     session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-a")
-    assert session.state["pending"] == expected.state_delta["pending"]
+    assert without_id(session.state["pending"]) == without_id(expected.state_delta["pending"])
 
     assert fake.calls == 1
     request = fake.requests[0]
@@ -236,11 +241,27 @@ def _no_tool_runs(monkeypatch) -> None:
         monkeypatch.setitem(TOOLS, name, dataclasses.replace(spec, execute=fail))
 
 
-# 13 (TASK.md lines 311-331): case B in one session, until every field is in
+def record_tools(monkeypatch) -> dict[str, list[dict]]:
+    """Wrap every tool's `execute` to record its arguments; the real mock still runs (D12)."""
+    calls: dict[str, list[dict]] = {name: [] for name in TOOLS}
+    for name, spec in list(TOOLS.items()):
+
+        def recorder(args, name=name, real=spec.execute):
+            calls[name].append(args)
+            return real(args)
+
+        monkeypatch.setitem(TOOLS, name, dataclasses.replace(spec, execute=recorder))
+    return calls
+
+
+# 13 (TASK.md lines 311-335): case B in one session, until every field is in, then a "yes".
+# Task 10a: the records are compared without `operation_id` (a new uuid on every call), the
+# complete ticket awaits confirmation, and the fourth turn runs `create_ticket` once.
 async def test_case_b_through_the_node(monkeypatch):
-    _no_tool_runs(monkeypatch)
+    calls = record_tools(monkeypatch)
     keys = ("B1", "B2", "B3")
-    fake = ScriptedLlm(script=[json.dumps(FIXED[key].interpretation) for key in keys])
+    script = [json.dumps(FIXED[key].interpretation) for key in (*keys, "G2")]
+    fake = ScriptedLlm(script=script)
     runner, sessions = make_runner(fake)
 
     replies_seen, expected, pending = [], [], None
@@ -255,7 +276,7 @@ async def test_case_b_through_the_node(monkeypatch):
     assert replies_seen == expected
     session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-b")
     record = session.state["pending"]
-    assert record == pending
+    assert without_id(record) == without_id(pending)
     assert record["steps"][0]["args"] == {
         "title": "Falla de autenticación",
         "description": "revisar el problema de autenticación",
@@ -263,10 +284,24 @@ async def test_case_b_through_the_node(monkeypatch):
         "assignee": "Carlos",
     }
     assert record["missing"] == []
-    assert record["last_question"] is None
-    assert record["status"] == "collecting"
-    assert replies_seen[-1].endswith(replies.READY_NOT_AVAILABLE_YET)
-    assert fake.calls == 3
+    assert record["status"] == "awaiting_confirmation"
+    assert replies_seen[-1].endswith(record["last_question"])
+    assert all(not args for args in calls.values())  # nothing runs before the "yes"
+
+    await run_turn(runner, USER, "s-b", FIXED["G2"].message)
+
+    assert calls["create_ticket"] == [
+        {
+            "title": "Falla de autenticación",
+            "description": "revisar el problema de autenticación",
+            "priority": "high",
+            "assignee": "Carlos",
+        }
+    ]
+    assert calls["schedule_meeting"] == [] and calls["send_notification"] == []
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-b")
+    assert session.state["pending"] is None
+    assert fake.calls == 4
 
 
 # 14: with test 13 (Carlos gets in), this shows the core receives the real message text: the
@@ -386,7 +421,7 @@ async def test_http_retry_through_the_turn_node(script, error, caplog):
     if error is None:
         expected = handle_fixed(None, "A1")
         assert event_text(answers[0]) == expected.reply
-        assert session.state["pending"] == expected.state_delta["pending"]
+        assert without_id(session.state["pending"]) == without_id(expected.state_delta["pending"])
         assert "route=R2" in line
         assert "error=" not in line  # same fields as a turn that was not retried
     else:
@@ -445,7 +480,7 @@ async def test_invalid_word_through_the_node(monkeypatch, caplog):
     assert event_text(reply_events(events)[0]) == expected.reply
     session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-x")
     record = session.state["pending"]
-    assert record == expected.state_delta["pending"]
+    assert without_id(record) == without_id(expected.state_delta["pending"])
     assert record["invalid"] == [
         {"tool": "create_ticket", "field": "priority", "cause": "not_allowed"}
     ]
@@ -497,3 +532,43 @@ async def test_complete_meeting_does_not_reach_confirmation(monkeypatch):
     assert session.state["pending"] == record
     assert session.state["pending"]["status"] == "collecting"  # never awaiting_confirmation
     assert fake.calls == 2
+
+
+# Brief 10a ------------------------------------------------------------------------------------
+
+
+# 14 (case G, TASK.md lines 424-438): the "yes" runs only the pending tool, once, with the
+# normalized values, and empties `pending`; the log ties both turns to the same operation.
+async def test_case_g_through_the_node(monkeypatch, caplog):
+    calls = record_tools(monkeypatch)
+    caplog.set_level(logging.INFO, logger="assistant")
+    fake = ScriptedLlm(
+        script=[json.dumps(FIXED["G1"].interpretation), json.dumps(FIXED["G2"].interpretation)]
+    )
+    runner, sessions = make_runner(fake)
+
+    first = await run_turn(runner, USER, "s-g", FIXED["G1"].message)
+    [g1_line] = _turn_records(caplog)
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-g")
+    record = session.state["pending"]
+    assert record["status"] == "awaiting_confirmation"
+    assert event_text(reply_events(first)[0]).endswith(record["last_question"])
+    assert all(not args for args in calls.values())
+    operation = record["operation_id"]
+    assert f"op={operation}" in g1_line and "route=R2" in g1_line
+
+    caplog.clear()
+    second = await run_turn(runner, USER, "s-g", FIXED["G2"].message)
+
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-g")
+    assert session.state["pending"] is None
+    assert calls["send_notification"] == [
+        {"recipient": "Carlos", "message": "el ticket quedó resuelto", "channel": "email"}
+    ]
+    assert calls["create_ticket"] == [] and calls["schedule_meeting"] == []
+    assert fake.calls == 2
+    [answer] = reply_events(second)
+    assert event_text(answer).startswith("Notificación NTF-")
+    [g2_line] = _turn_records(caplog)
+    assert "route=confirmed" in g2_line
+    assert f"op={operation}" in g2_line

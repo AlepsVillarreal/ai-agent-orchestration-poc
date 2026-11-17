@@ -1,10 +1,12 @@
 import dataclasses
 import json
+import re
 from typing import Any
 
 import pytest
 
 from core import replies
+from core.confirmation import confirmation_hash, shown_values
 from core.instruction import pending_summary
 from core.interpretation import TurnInterpretation
 from core.merge import Note
@@ -51,6 +53,12 @@ def _all_values(value: Any) -> list[str]:
     if isinstance(value, list):
         return [text for item in value for text in _all_values(item)]
     return [str(value)]
+
+
+def confirmation_text(record: dict) -> str:
+    """What a record awaiting confirmation shows: the normalized values, then the question."""
+    summary = replies.confirmation_summary(shown_values(record["steps"]))
+    return f"{summary}\n{record['last_question']}"
 
 
 # 4
@@ -240,19 +248,8 @@ def test_pending_args_leave_absent_values_out():
     assert record["missing"] == ["title", "date", "time"]
 
 
-# 14
-@pytest.mark.parametrize("key", ["G1", "H1"])
-def test_complete_request_creates_pending_but_does_not_execute(key):
-    outcome = handle_fixed(None, key)
-    record = outcome.state_delta["pending"]
-
-    assert outcome.route == "R2"
-    assert record["missing"] == []
-    assert record["status"] == "collecting"
-    # R2 shows its fills first (decision 1 of brief 08), so the template ends the reply.
-    assert outcome.reply.endswith(replies.READY_NOT_AVAILABLE_YET)
-    assert record["last_question"] is None
-    assert "Last question to the user: none" in pending_summary(record)
+# 14 became test 1 of brief 10a (`test_complete_request_awaits_confirmation`): a complete
+# request now awaits confirmation instead of closing with the provisional template of D19.
 
 
 # 15
@@ -270,9 +267,10 @@ def test_no_turn_executes_a_tool(monkeypatch):
     run_conversation("B1", "B2", "B3")  # case B until complete
 
 
-# 16: what stays provisional with something pending (tasks 10a and 12). F2 with F1 pending is
-# *Otra tool*, case F: nothing of the meeting is mixed into the ticket.
-@pytest.mark.parametrize(("first", "key"), [("A1", "G2"), ("A1", "Q1"), ("F1", "F2")])
+# 16: what stays provisional with something pending (tasks 12 and 13). F2 with F1 pending is
+# *Otra tool*, case F: nothing of the meeting is mixed into the ticket. ("A1", "G2") left in task
+# 10a: a "yes" while collecting repeats the question (test_yes_while_collecting_...).
+@pytest.mark.parametrize(("first", "key"), [("A1", "Q1"), ("F1", "F2")])
 def test_anything_with_pending_is_provisional_and_keeps_state(first, key):
     pending = handle_fixed(None, first).state_delta["pending"]
     outcome = handle_fixed(pending, key)
@@ -405,9 +403,9 @@ def test_case_b_until_complete(monkeypatch):
         }
     ]
     assert record["missing"] == []
-    assert record["last_question"] is None
-    assert record["status"] == "collecting"
-    assert outcome.reply.endswith(replies.READY_NOT_AVAILABLE_YET)
+    # Task 10a: the complete ticket awaits confirmation (test_case_b_reaches_confirmation).
+    assert record["status"] == "awaiting_confirmation"
+    assert outcome.reply.endswith(record["last_question"])
     assert "Falla de autenticación" in outcome.reply  # the fill of the title is shown
 
 
@@ -451,7 +449,7 @@ def test_repeated_request_changes_nothing():
     complete = handle_fixed(None, "H1").state_delta["pending"]
     outcome = handle_fixed(complete, "H1")
     assert outcome.state_delta == {}
-    assert outcome.reply == replies.READY_NOT_AVAILABLE_YET
+    assert outcome.reply == confirmation_text(complete)  # task 10a: the confirmation again
 
 
 # 8 (decision 1 of brief 08; the note is written in the present, so it is true here too)
@@ -541,13 +539,9 @@ def test_case_d_reply_names_every_component():
     assert "Anoté la hora: 25:90." in lines
 
 
-# Review note 4: *Misma tool* applies only to a `collecting` record (10a and 13 own the rest).
+# Review note 4: *Misma tool* applies only to a `collecting` record and, since task 10a, to one
+# awaiting confirmation (test_correction_while_awaiting); the clarification is task 13.
 def test_same_tool_needs_a_collecting_record():
-    confirming = {**a1_pending(), "status": "awaiting_confirmation"}
-    outcome = handle_fixed(confirming, "B2")
-    assert outcome.route == "pending_provisional"
-    assert outcome.state_delta == {}
-
     clarifying = {
         "tools": ["send_notification", "schedule_meeting"],
         "status": "awaiting_clarification",
@@ -622,12 +616,13 @@ def test_correction_clears_invalid():
     assert outcome.reply.endswith(record["last_question"])
 
     complete = handle_fixed(None, "H1").state_delta["pending"]
-    assert complete["invalid"] == [] and complete["last_question"] is None
+    assert complete["invalid"] == [] and complete["status"] == "awaiting_confirmation"
     urgent = interpretation("provide_info", op("create_ticket", priority="urgente"))
     outcome = handle_turn(complete, urgent, TurnInput("Mejor urgente"))
     record = outcome.state_delta["pending"]
 
     assert record["steps"][0]["args"]["priority"] == "urgente"  # a new invalid value replaces
+    assert record["status"] == "collecting" and "confirmation_hash" not in record
     assert record["invalid"] == [
         {"tool": "create_ticket", "field": "priority", "cause": "not_allowed"}
     ]
@@ -679,8 +674,345 @@ def test_complete_meeting_waits_for_dates():
     assert record["invalid"] == []
     assert record["last_question"] is None
     assert outcome.reply.endswith(replies.DATE_TIME_NOT_CHECKED_YET)
-    assert replies.READY_NOT_AVAILABLE_YET not in outcome.reply
+    assert "confirmation_hash" not in record  # never awaits confirmation before task 09b
 
     again = handle_turn(record, _meeting(), TurnInput(_COMPLETE_MEETING_MESSAGE))
     assert again.state_delta == {}
     assert again.reply == replies.DATE_TIME_NOT_CHECKED_YET
+
+
+# Brief 10a ------------------------------------------------------------------------------------
+
+
+def record_tools(monkeypatch) -> dict[str, list[dict]]:
+    """Wrap every tool's `execute` to record its arguments; the real mock still runs, so the
+    values it receives are checked against the contract (D12)."""
+    calls: dict[str, list[dict]] = {name: [] for name in TOOLS}
+    for name, spec in list(TOOLS.items()):
+
+        def recorder(args, name=name, real=spec.execute):
+            calls[name].append(args)
+            return real(args)
+
+        monkeypatch.setitem(TOOLS, name, dataclasses.replace(spec, execute=recorder))
+    return calls
+
+
+def nothing_ran(calls: dict[str, list[dict]]) -> bool:
+    return all(not args for args in calls.values())
+
+
+def g1_pending() -> dict:
+    return handle_fixed(None, "G1").state_delta["pending"]
+
+
+def confirm(*operations: dict[str, Any], confirms_tool: str | None = None) -> TurnInterpretation:
+    return TurnInterpretation.model_validate(
+        {"act": "confirm", "operations": list(operations), "confirms_tool": confirms_tool}
+    )
+
+
+G1_NORMALIZED = {"recipient": "Carlos", "message": "el ticket quedó resuelto", "channel": "email"}
+
+
+# 1 (D7.1, D7.2, D43)
+@pytest.mark.parametrize(
+    ("key", "shown", "canonical"),
+    [("G1", "- El canal: correo", "email"), ("H1", "- La prioridad: alta", "high")],
+)
+def test_complete_request_awaits_confirmation(monkeypatch, key, shown, canonical):
+    calls = record_tools(monkeypatch)
+    outcome = handle_fixed(None, key)
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "R2"
+    assert record["status"] == "awaiting_confirmation"
+    assert record["missing"] == [] and record["invalid"] == []
+    assert re.fullmatch(r"[0-9a-f]{32}", record["operation_id"])
+    assert record["confirmation_hash"] == confirmation_hash(shown_values(record["steps"]))
+
+    lines = _lines(outcome.reply)
+    assert shown in lines  # the Spanish label of the normalized value
+    assert canonical not in outcome.reply
+    assert outcome.reply.endswith(confirmation_text(record))
+    assert lines[-1] == record["last_question"]
+
+    question = record["last_question"].lower()
+    for word in ("carlos", "resuelto", "correo", "alta", "baja", "media"):
+        assert word not in question, word
+    summary = pending_summary(record)
+    assert "Status: awaiting_confirmation" in summary
+    assert record["confirmation_hash"] not in summary
+    assert nothing_ran(calls)
+
+
+# 2 (TASK.md lines 311-335: case B ends with a confirmation, then a "yes")
+def test_case_b_reaches_confirmation():
+    b1 = handle_fixed(None, "B1").state_delta["pending"]
+    b2 = handle_fixed(b1, "B2").state_delta["pending"]
+    outcome = handle_fixed(b2, "B3")
+    record = outcome.state_delta["pending"]
+
+    assert b2["status"] == "collecting"
+    assert record["status"] == "awaiting_confirmation"
+    assert record["operation_id"] == b1["operation_id"]  # born in R2, kept by every merge
+    assert "- La prioridad: alta" in _lines(outcome.reply)
+    assert outcome.reply.endswith(confirmation_text(record))
+    assert record["last_question"] == "¿Confirmas que quieres crear un ticket? Responde sí o no."
+
+
+# 3 (case G, TASK.md lines 424-438; note (tt))
+@pytest.mark.parametrize("recipient", ["Carlos", " Carlos "])
+def test_yes_runs_the_pending_operation_once(monkeypatch, recipient):
+    calls = record_tools(monkeypatch)
+    g1 = json.loads(json.dumps(FIXED["G1"].interpretation))
+    g1["operations"][0]["args"]["recipient"] = recipient
+    pending = handle_turn(
+        None, TurnInterpretation.model_validate(g1), TurnInput(FIXED["G1"].message)
+    ).state_delta["pending"]
+    assert pending["steps"][0]["args"]["recipient"] == recipient  # kept as said (D4 rule 7)
+
+    outcome = handle_fixed(pending, "G2")
+
+    assert calls["send_notification"] == [G1_NORMALIZED]
+    assert calls["create_ticket"] == [] and calls["schedule_meeting"] == []
+    assert outcome.state_delta == {"pending": None}
+    assert outcome.route == "confirmed"
+    assert outcome.reply.startswith("Notificación NTF-")  # the mock's message until task 10b
+
+
+# 4 (D7.1, note (ss))
+def test_yes_while_collecting_repeats_the_question(monkeypatch):
+    calls = record_tools(monkeypatch)
+
+    pending = a1_pending()
+    outcome = handle_fixed(pending, "G2")
+    assert outcome.state_delta == {}
+    assert outcome.route == "confirm_incomplete"
+    assert outcome.reply == pending["last_question"]
+
+    pending = handle_fixed(None, "X1").state_delta["pending"]
+    outcome = handle_fixed(pending, "G2")
+    invalid = replies.invalid_line(_TICKET_FIELDS["priority"], "not_allowed")
+    assert outcome.state_delta == {}
+    assert outcome.reply == f"{invalid}\n{pending['last_question']}"
+    assert nothing_ran(calls)
+
+
+# 5 (what D4 requires of D7: a change never runs)
+def test_yes_with_a_change_never_runs(monkeypatch):
+    calls = record_tools(monkeypatch)
+
+    pending = g1_pending()
+    sms = confirm(op("send_notification", channel="SMS"))
+    outcome = handle_turn(pending, sms, TurnInput("Sí, pero por SMS"))
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "confirm_merged"
+    assert _lines(outcome.reply)[0] == "Cambié el canal: correo → SMS."
+    assert record["status"] == "awaiting_confirmation"
+    assert record["confirmation_hash"] != pending["confirmation_hash"]
+    assert record["operation_id"] == pending["operation_id"]
+    assert outcome.reply.endswith(confirmation_text(record))
+
+    pending = handle_fixed(None, "H1").state_delta["pending"]
+    urgent = confirm(op("create_ticket", priority="urgente"))
+    outcome = handle_turn(pending, urgent, TurnInput("Sí, pero con prioridad urgente"))
+    record = outcome.state_delta["pending"]
+
+    assert record["status"] == "collecting"
+    assert "confirmation_hash" not in record
+    assert record["invalid"] == [
+        {"tool": "create_ticket", "field": "priority", "cause": "not_allowed"}
+    ]
+    assert outcome.reply.endswith(record["last_question"])
+    assert nothing_ran(calls)
+
+
+# 6 (D38, notes (jj)/(qq)): a name the "yes" repeats but does not write is rejected
+def test_yes_with_a_resent_name_is_rejected(monkeypatch):
+    calls = record_tools(monkeypatch)
+    pending = g1_pending()
+    turn = confirm(op("send_notification", recipient="Carlos"))
+
+    outcome = handle_turn(pending, turn, TurnInput(FIXED["G2"].message))
+
+    assert outcome.reply == f"{replies.REJECTED_NAME_LINE}\n{confirmation_text(pending)}"
+    assert outcome.state_delta == {}
+    assert [(r.key, r.name) for r in outcome.rejected] == [("recipient", "Carlos")]
+    assert nothing_ran(calls)
+
+
+# 7 (D7.4)
+@pytest.mark.parametrize(
+    ("confirms_tool", "runs"),
+    [("create_ticket", False), ("send_notification", True), (None, True)],
+)
+def test_confirms_tool_veto(monkeypatch, confirms_tool, runs):
+    calls = record_tools(monkeypatch)
+    pending = g1_pending()
+
+    outcome = handle_turn(pending, confirm(confirms_tool=confirms_tool), TurnInput("Sí"))
+
+    if runs:
+        assert calls["send_notification"] == [G1_NORMALIZED]
+        assert outcome.state_delta == {"pending": None}
+    else:
+        assert nothing_ran(calls)
+        assert outcome.state_delta == {}
+        assert outcome.route == "confirm_vetoed"
+        assert outcome.reply == confirmation_text(pending)
+
+
+# 8 (D7.2)
+def test_hash_mismatch_asks_again(monkeypatch):
+    calls = record_tools(monkeypatch)
+    pending = g1_pending()
+    tampered = {**pending, "confirmation_hash": "0" * 64}
+
+    outcome = handle_fixed(tampered, "G2")
+
+    assert nothing_ran(calls)
+    assert outcome.route == "confirm_hash_changed"
+    assert outcome.reply == confirmation_text(pending)
+    assert outcome.state_delta == {"pending": pending}  # the recomputed hash is stored
+
+    again = handle_fixed(outcome.state_delta["pending"], "G2")  # the next "yes" counts
+    assert again.route == "confirmed"
+    assert calls["send_notification"] == [G1_NORMALIZED]
+
+
+# 9 (D9 *Caso H* while awaiting confirmation; TASK.md line 447)
+def test_repeated_request_while_awaiting(monkeypatch):
+    calls = record_tools(monkeypatch)
+    pending = handle_fixed(None, "H1").state_delta["pending"]
+
+    outcome = handle_fixed(pending, "H1")
+
+    assert outcome.route == "same_tool"
+    assert outcome.state_delta == {}
+    assert outcome.reply == confirmation_text(pending)
+    assert nothing_ran(calls)
+
+
+# 10 (D3 *Misma tool* with `awaiting_confirmation`)
+def test_correction_while_awaiting(monkeypatch):
+    calls = record_tools(monkeypatch)
+    pending = g1_pending()
+    push = interpretation("provide_info", op("send_notification", channel="push"))
+
+    outcome = handle_turn(pending, push, TurnInput("Mejor por push"))
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "same_tool"
+    assert record["status"] == "awaiting_confirmation"
+    assert record["confirmation_hash"] != pending["confirmation_hash"]
+    assert "- El canal: push" in _lines(outcome.reply)
+    assert outcome.reply.endswith(confirmation_text(record))
+    assert nothing_ran(calls)
+
+
+# 11 (author's answer to brief 10a, option (a)): a "yes" with another tool runs nothing
+def test_yes_with_another_tool_never_runs(monkeypatch):
+    calls = record_tools(monkeypatch)
+    pending = g1_pending()
+
+    ticket = confirm(op("create_ticket", description="revisar el servidor"))
+    message = "Sí, y crea un ticket para revisar el servidor"
+    outcome = handle_turn(pending, ticket, TurnInput(message))
+    assert outcome.route == "confirm_other_tool"
+    assert outcome.state_delta == {}
+    assert outcome.reply == confirmation_text(pending)
+
+    pizza = confirm(op("send_notification"), op("order_pizza"))
+    outcome = handle_turn(pending, pizza, TurnInput("Sí, y pide una pizza"))
+    assert outcome.state_delta == {}
+    assert outcome.reply == f"{replies.UNKNOWN_TOOL_LINE}\n{confirmation_text(pending)}"
+
+    collecting = a1_pending()
+    meeting = confirm(op("schedule_meeting", attendees=["Juan"]))
+    outcome = handle_turn(collecting, meeting, TurnInput("Sí, y agenda una reunión con Juan"))
+    assert outcome.state_delta == {}
+    assert outcome.reply == collecting["last_question"]
+    assert nothing_ran(calls)
+
+
+# 12 (note (ll)): the D10 line before the confirmation repeated by *Misma tool*
+def test_unknown_tool_while_awaiting_adds_the_d10_line():
+    pending = g1_pending()
+    flight = interpretation("provide_info", op("book_flight"))
+
+    outcome = handle_turn(pending, flight, TurnInput("Y reserva un vuelo"))
+
+    assert outcome.reply == f"{replies.UNKNOWN_TOOL_LINE}\n{confirmation_text(pending)}"
+    assert outcome.state_delta == {}
+
+
+# Review 10a-1 ---------------------------------------------------------------------------------
+
+
+# Should-fix 1: a stored value that stopped being valid between the confirmation and the "yes"
+# (a hand-edited or old record today; a date that expires from task 09b) sends the record back
+# to `collecting`. The mock is never called with incomplete arguments.
+def test_hash_mismatch_with_an_invalid_value_goes_back_to_collecting(monkeypatch):
+    calls = record_tools(monkeypatch)
+    pending = g1_pending()
+    stale = json.loads(json.dumps(pending))
+    stale["steps"][0]["args"]["channel"] = "fax"  # the hash still covers "correo"
+
+    outcome = handle_fixed(stale, "G2")
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "confirm_hash_changed"
+    assert record["status"] == "collecting"
+    assert "confirmation_hash" not in record
+    assert record["invalid"] == [
+        {"tool": "send_notification", "field": "channel", "cause": "not_allowed"}
+    ]
+    assert record["operation_id"] == pending["operation_id"]
+    channel = TOOLS["send_notification"].fields[2]
+    assert _lines(outcome.reply) == [
+        replies.invalid_line(channel, "not_allowed"),
+        record["last_question"],
+    ]
+
+    again = handle_fixed(record, "G2")  # a second "yes" repeats the question
+    assert again.route == "confirm_incomplete"
+    assert again.state_delta == {}
+    assert nothing_ran(calls)
+
+
+# Should-fix 2 (what D4 requires of D7): a `confirm` whose merge gives only a note never counts.
+# Only a list field gives notes, and a meeting cannot await confirmation before task 09b, so the
+# note is checked on a `collecting` meeting: without the note in the condition the turn would
+# take `confirm_incomplete` and drop the note line.
+def test_yes_with_a_note_never_counts(monkeypatch):
+    calls = record_tools(monkeypatch)
+    pending = handle_fixed(None, "F1").state_delta["pending"]  # a meeting with Juan
+    turn = confirm(op("schedule_meeting", attendees_remove=["Ana"]))
+
+    outcome = handle_turn(pending, turn, TurnInput("Sí, y quita a Ana"))
+
+    attendees = TOOLS["schedule_meeting"].fields[4]
+    assert outcome.route == "confirm_merged"
+    assert outcome.state_delta == {}
+    assert _lines(outcome.reply) == [
+        replies.note_line(attendees, Note("attendees", "remove_absent", "Ana")),
+        pending["last_question"],
+    ]
+    assert nothing_ran(calls)
+
+
+# Review note 4 (autodecided AJ): a "yes" that repeats a stored value, or a name written in the
+# message, changes nothing after normalization (D4 rule 5), so it counts as a yes.
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [({"channel": "correo"}, "Sí, por correo"), ({"recipient": "Carlos"}, "Sí, envíalo a Carlos")],
+)
+def test_yes_repeating_a_stored_value_counts(monkeypatch, args, message):
+    calls = record_tools(monkeypatch)
+    turn = confirm(op("send_notification", **args))
+    outcome = handle_turn(g1_pending(), turn, TurnInput(message))
+
+    assert outcome.route == "confirmed"
+    assert calls["send_notification"] == [G1_NORMALIZED]

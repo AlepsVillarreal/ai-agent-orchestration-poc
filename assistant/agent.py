@@ -83,9 +83,12 @@ def log_turn(
     changes: Sequence[Change] = (),
     rejected: Sequence[Rejected] = (),
     invalid: Sequence[dict] = (),
+    operation_id: str | None = None,
 ) -> None:
     """One `key=value` line per turn. `route` comes from the core, never from the reply text.
 
+    `op` is the `operation_id` of the turn's record (the one the turn created or changed, else
+    the one that was pending), when there is one; a uuid, never a user value.
     `ops` lists the operations as the interpreter returned them, before the registry filter, so
     an unknown tool dropped by D10 stays visible. The keys before `changes=` carry no argument
     value and no message text. A turn the interpreter understood adds `invalid=`
@@ -99,7 +102,10 @@ def log_turn(
         f"{operation.tool}:{operation.certainty.value}"
         for operation in (interpretation.operations if interpretation else [])
     )
-    parts = [f"session={session_id}", f"act={act}", f"ops={ops}", f"route={route}"]
+    parts = [f"session={session_id}"]
+    if operation_id:
+        parts.append(f"op={operation_id}")
+    parts += [f"act={act}", f"ops={ops}", f"route={route}"]
     if error:
         parts.append(f"error={error}")
     if interpretation:
@@ -112,6 +118,10 @@ def log_turn(
     if interpretation and interpretation.ambiguity_reason:
         parts.append(f"ambiguity={interpretation.ambiguity_reason!r}")
     logger.info(" ".join(parts))
+
+
+def _operation_id(record: dict | None) -> str | None:
+    return record.get("operation_id") if record else None
 
 
 def build_root_agent(interpreter: LlmAgent) -> Workflow:
@@ -138,6 +148,7 @@ def build_root_agent(interpreter: LlmAgent) -> Workflow:
                 ctx.session.id,
                 route,
                 error=type(inner).__name__ if inner is not None else "empty_output",
+                operation_id=_operation_id(pending),
             )
             return Event(message=_FAILURE_REPLIES[route])  # no `state`: nothing changes
 
@@ -153,6 +164,8 @@ def build_root_agent(interpreter: LlmAgent) -> Workflow:
             changes=outcome.changes,
             rejected=outcome.rejected,
             invalid=outcome.invalid,
+            # The record the turn wrote, or the pending one when it wrote none or emptied it.
+            operation_id=_operation_id(outcome.state_delta.get("pending") or pending),
         )
         return Event(message=outcome.reply, state=outcome.state_delta)
 
