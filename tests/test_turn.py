@@ -1,6 +1,7 @@
 import dataclasses
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -8,10 +9,11 @@ import pytest
 from core import replies
 from core.confirmation import confirmation_hash, shown_values
 from core.instruction import pending_summary
-from core.interpretation import TurnInterpretation
+from core.interpretation import Act, Certainty, TurnInterpretation
 from core.merge import Note
 from core.registry import TOOLS
 from core.turn import TurnInput, TurnOutcome, filter_by_registry, handle_turn
+from tests.case_c_judge import read_records
 from tests.interpretations import FIXED
 
 
@@ -1152,3 +1154,194 @@ def test_only_a_confirmed_yes_writes_history():
         assert "history" not in outcome.state_delta, outcome.route
         assert outcome.route != "confirmed"
         assert outcome.results == []
+
+
+# Brief 08b ------------------------------------------------------------------------------------
+
+# The phase 0 run of task 06 where `L4` came split in two operations (D32; finding 8 of
+# 06-round-1). Read as saved, so the evidence is the same output the code now handles.
+PHASE0_RUN = (
+    Path(__file__).resolve().parent.parent
+    / "phase0"
+    / "runs"
+    / "20261117T073844Z-gemini-3.5-flash-lite.jsonl"
+)
+
+
+def measured_l4() -> tuple[TurnInterpretation, str]:
+    """The model's raw `L4` output, validated as the interpreter would, and its message."""
+    (record,) = [record for record in read_records(PHASE0_RUN) if record["id"] == "L4"]
+    return TurnInterpretation.model_validate_json(record["raw"]), record["message"]
+
+
+def f1_pending() -> dict:
+    return handle_fixed(None, "F1").state_delta["pending"]
+
+
+def h1_pending() -> dict:
+    return handle_fixed(None, "H1").state_delta["pending"]
+
+
+def with_dependency(operation: dict[str, Any], depends_on: str | None) -> dict[str, Any]:
+    return {**operation, "depends_on": depends_on}
+
+
+# 1 (D11.1, D35; the `request_action` variant is finding 10 of 06-round-1)
+@pytest.mark.parametrize("certainty", ["explicit", "plausible"])
+@pytest.mark.parametrize("act", ["request_action", "provide_info"])
+def test_measured_l4_is_joined(act, certainty):
+    measured, message = measured_l4()
+    first, second = measured.operations
+    assert len(measured.operations) == 2 and first.tool == second.tool == "schedule_meeting"
+    turn = measured.model_copy(
+        update={
+            "act": Act(act),
+            "operations": [first, second.model_copy(update={"certainty": Certainty(certainty)})],
+        }
+    )
+    pending = f1_pending()
+
+    outcome = handle_turn(pending, turn, TurnInput(message))
+    single = handle_fixed(pending, "L4")
+
+    assert outcome.route == "same_tool"
+    assert outcome.state_delta["pending"]["steps"][0]["args"]["attendees"] == ["Ana"]
+    assert outcome.reply == single.reply
+    assert outcome.state_delta == single.state_delta
+
+
+# 2 (D11.1, pending (a): keys without absent values; a "" never overwrites)
+def test_split_ops_ignore_absent_keys():
+    turn = interpretation(
+        "provide_info",
+        op("schedule_meeting", title="Revisión", attendees_remove=["Juan"]),
+        op("schedule_meeting", title="", attendees_add=["Ana"]),
+    )
+    message = "Ponle de título Revisión, quita a Juan y agrega a Ana"
+
+    outcome = handle_turn(f1_pending(), turn, TurnInput(message))
+    args = outcome.state_delta["pending"]["steps"][0]["args"]
+
+    assert outcome.route == "same_tool"
+    assert args["title"] == "Revisión"
+    assert args["attendees"] == ["Ana"]
+
+
+# 3 (D11.1 with a record awaiting confirmation, D47)
+def test_split_ops_while_awaiting_confirmation(monkeypatch):
+    calls = record_tools(monkeypatch)
+    pending = h1_pending()
+    turn = interpretation(
+        "provide_info",
+        op("create_ticket", priority="media"),
+        op("create_ticket", assignee="Ana"),
+    )
+
+    outcome = handle_turn(pending, turn, TurnInput("Mejor prioridad media y asígnalo a Ana"))
+    record = outcome.state_delta["pending"]
+    args = record["steps"][0]["args"]
+
+    assert outcome.route == "same_tool"
+    assert record["status"] == "awaiting_confirmation"
+    assert record["confirmation_hash"] != pending["confirmation_hash"]
+    assert args["priority"] == "media"
+    assert args["assignee"] == "Ana"
+    assert outcome.reply.endswith(confirmation_text(record))
+    assert nothing_ran(calls)
+
+
+# 4 (D11.1: a repeated key; D35 and pending (b): different `depends_on`, None included)
+@pytest.mark.parametrize(
+    ("operations", "message"),
+    [
+        (
+            [
+                op("schedule_meeting", attendees_add=["Ana"]),
+                op("schedule_meeting", attendees_add=["Luis"]),
+            ],
+            "Agrega a Ana y a Luis",
+        ),
+        (
+            [
+                with_dependency(op("schedule_meeting", attendees_remove=["Juan"]), None),
+                with_dependency(op("schedule_meeting", attendees_add=["Ana"]), "create_ticket"),
+            ],
+            "Quita a Juan y agrega a Ana",
+        ),
+        (
+            [
+                with_dependency(
+                    op("schedule_meeting", attendees_remove=["Juan"]), "send_notification"
+                ),
+                with_dependency(op("schedule_meeting", attendees_add=["Ana"]), "create_ticket"),
+            ],
+            "Quita a Juan y agrega a Ana",
+        ),
+    ],
+    ids=["same_bucket", "none_and_a_dependency", "two_dependencies"],
+)
+def test_overlapping_split_ops_follow_d11(operations, message):
+    outcome = handle_turn(
+        f1_pending(), interpretation("provide_info", *operations), TurnInput(message)
+    )
+
+    assert outcome.route == "d11"
+    assert outcome.reply == replies.ONE_PER_TOOL
+    assert outcome.state_delta == {}
+
+
+_TWO_DISJOINT_TICKETS = interpretation(
+    "request_action",
+    op("create_ticket", title="Servidor caído"),
+    op("create_ticket", priority="alta"),
+)
+_TWO_TICKETS_MESSAGE = "Crea un ticket titulado Servidor caído y otro de prioridad alta"
+
+
+def _mixed_turn(certainty: str) -> TurnInterpretation:
+    return interpretation(
+        "request_action",
+        op("schedule_meeting", attendees_remove=["Juan"]),
+        op("schedule_meeting", attendees_add=["Ana"]),
+        op("create_ticket", certainty, description="revisar el servidor"),
+    )
+
+
+# 5 (D11.1 only in *Misma tool*: "dos tickets pedidos no se vuelven uno"; should-fix 1 of
+# 06-round-3). Joined outside the branch, (i) would give `pending_provisional`, (ii) `R2` and
+# (iv) `confirm_merged`.
+@pytest.mark.parametrize(
+    ("pending_key", "turn", "message"),
+    [
+        (
+            "F1",
+            _mixed_turn("explicit"),
+            "Quita a Juan, agrega a Ana y crea un ticket para revisar el servidor",
+        ),
+        (
+            "F1",
+            _mixed_turn("plausible"),
+            "Quita a Juan, agrega a Ana y crea un ticket para revisar el servidor",
+        ),
+        (None, _TWO_DISJOINT_TICKETS, _TWO_TICKETS_MESSAGE),
+        ("F1", _TWO_DISJOINT_TICKETS, _TWO_TICKETS_MESSAGE),
+        (
+            "H1",
+            confirm(op("create_ticket", priority="media"), op("create_ticket", assignee="Ana")),
+            "Sí, con prioridad media y asígnalo a Ana",
+        ),
+    ],
+    ids=["mixed_explicit", "mixed_plausible", "nothing_pending", "other_tool_pending", "confirm"],
+)
+def test_split_ops_outside_same_tool_follow_d11(monkeypatch, pending_key, turn, message):
+    calls = record_tools(monkeypatch)
+    pending = None
+    if pending_key is not None:
+        pending = handle_fixed(None, pending_key).state_delta["pending"]
+
+    outcome = handle_turn(pending, turn, TurnInput(message))
+
+    assert outcome.route == "d11"
+    assert outcome.reply == replies.ONE_PER_TOOL
+    assert outcome.state_delta == {}
+    assert nothing_ran(calls)

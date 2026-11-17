@@ -9,7 +9,12 @@ state (D1.1). `_run_confirmed` is the only place in the code that runs a tool (D
 Order of a turn (D3, *Compuerta de entrada*):
 1. Registry filter (`filter_by_registry`): drop operations of unknown tools and keep only the
    contract keys of each tool, list buckets included, and `depends_on` (D2, D10).
-2. D11: two operations of the same tool -> ask which one first; state unchanged.
+2. D11: two operations of the same tool -> ask which one first; state unchanged. Exception
+   (D11.1, D35): in the *Misma tool* branch below, the operations of one pending tool whose
+   args share no key (each `_add`/`_remove` bucket is its own key; absent values do not count)
+   and that bring the same `depends_on` are first joined into one, which then goes through
+   the merge like any single operation. Nothing pending, another tool in the turn or `confirm`:
+   D11 as written, so two requested tickets never become one.
 3. Something pending, in `collecting` or `awaiting_confirmation`:
    - `confirm` -> `_confirm`, in this order: (1) an operation of another tool, or something
      the filter dropped -> repeat what is pending (author's answer to brief 10a, option (a));
@@ -59,6 +64,7 @@ from core.confirmation import confirmation_hash, shown_values
 from core.history import COMPLETED, appended, closed_entry
 from core.interpretation import Act, Certainty, TurnInterpretation
 from core.merge import Change, MergeResult, Rejected, merge_args
+from core.presence import drop_absent
 from core.registry import TOOLS, FieldKind, ToolSpec, list_buckets
 from core.validation import validate
 
@@ -125,6 +131,10 @@ def _decide(
     dropped_some: bool,
     history: Sequence[dict],
 ) -> TurnOutcome:
+    same_tool = _is_same_tool(pending, act, operations)
+    if same_tool:
+        operations = _join_split_operations(operations)  # D11.1
+
     tool_counts = Counter(operation["tool"] for operation in operations)
     if any(count > 1 for count in tool_counts.values()):
         return TurnOutcome(replies.ONE_PER_TOOL, route="d11")
@@ -135,9 +145,7 @@ def _decide(
         if pending.get("status") in (COLLECTING, AWAITING_CONFIRMATION):
             if act == Act.CONFIRM:
                 return _confirm(pending, operations, message, confirms_tool, dropped_some, history)
-            if act in (Act.REQUEST_ACTION, Act.PROVIDE_INFO) and all(
-                operation["tool"] in pending["tools"] for operation in operations
-            ):
+            if same_tool:
                 steps, merges = _merge_steps(pending, operations, message)
                 return _after_merge(pending, steps, merges, route="same_tool")
         return TurnOutcome(replies.PENDING_NOT_SUPPORTED_YET, route="pending_provisional")
@@ -149,6 +157,44 @@ def _decide(
         return TurnOutcome(replies.capabilities(), route="template")
     # `request_action`, or `provide_info` with operations, which is treated the same.
     return _rules_table(operations, message)
+
+
+def _is_same_tool(pending: dict | None, act: Act, operations: list[dict]) -> bool:
+    """D3 gate, step 3, *Misma tool*: a `collecting` or `awaiting_confirmation` record, `act`
+    `request_action` or `provide_info`, and every operation of a pending tool (none counts too).
+
+    A clarification (`awaiting_clarification`, task 13) is not *Misma tool*, so its candidates
+    are not pending tools here (D11.1, pending (c)).
+    """
+    return (
+        bool(pending)
+        and pending.get("status") in (COLLECTING, AWAITING_CONFIRMATION)
+        and act in (Act.REQUEST_ACTION, Act.PROVIDE_INFO)
+        and all(operation["tool"] in pending["tools"] for operation in operations)
+    )
+
+
+def _join_split_operations(operations: list[dict]) -> list[dict]:
+    """D11.1: join the operations of one tool into one when their args share no key.
+
+    Keys are counted after the registry filter and without absent values (D4 rule 2), so a
+    `""` in one operation never overwrites a value of another. Each `_add`/`_remove` bucket is
+    its own key. The whole group of a tool is joined, or none of it: a repeated key or a
+    different `depends_on` (None included, D35) leaves the group as it came, and D11 asks.
+    The joined operation keeps the first one's `certainty`, which *Misma tool* ignores (D2).
+    """
+    result = []
+    for tool in dict.fromkeys(operation["tool"] for operation in operations):
+        group = [operation for operation in operations if operation["tool"] == tool]
+        args_list = [drop_absent(operation["args"]) for operation in group]
+        keys = [key for args in args_list for key in args]
+        same_dependency = len({operation["depends_on"] for operation in group}) == 1
+        if len(group) == 1 or len(set(keys)) < len(keys) or not same_dependency:
+            result += group
+            continue
+        joined_args = {key: value for args in args_list for key, value in args.items()}
+        result.append({**group[0], "args": joined_args})
+    return result
 
 
 def _rules_table(operations: list[dict], message: str) -> TurnOutcome:
