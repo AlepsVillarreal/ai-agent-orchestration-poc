@@ -1293,7 +1293,7 @@ por el autor
   repite, o si traen `depends_on` distintos (D35), sigue la pregunta de D11. Sin nada
   pendiente, o con otra tool en el turno, D11 no cambia: dos tickets pedidos no se vuelven
   uno. La implementa la tarea 08 [corregido en D42: la 08b]; hasta entonces `core/turn.py` (`_decide`) aplica D11 tal
-  como está escrita.
+  como está escrita. [resuelto en D54]
 - **Motivo:** en la fase 0, `L4` ("Quita a Juan y agrega a Ana", con la reunión con Juan
   pendiente) trajo las cubetas correctas partidas en dos operaciones de `schedule_meeting`
   (D32), y D11 no aplicaba nada. TASK.md líneas 143-145 piden actualizar lo recopilado con la
@@ -1307,9 +1307,9 @@ por el autor
 - **Precisa D11:** la opción "juntarlas en una sola operación" de sus *Descartadas* sigue
   descartada fuera de esta rama. El texto de D11 no se edita.
 - **Pendiente** (para la brief 08): si las claves se cuentan después del filtro del registro
-  (el `L4` medido trae `"message": null` en las dos operaciones); cómo llega `depends_on` a la
-  fusión, porque `_filter_by_registry` (`core/turn.py`) hoy lo descarta [resuelto en D42]; y si una candidata de
-  una aclaración cuenta como tool pendiente.
+  (el `L4` medido trae `"message": null` en las dos operaciones) [resuelto en D54]; cómo llega `depends_on` a la
+  fusión, porque `_filter_by_registry` (`core/turn.py`) hoy lo descarta [resuelto en D42; nulo frente a un valor, en D54]; y si una candidata de
+  una aclaración cuenta como tool pendiente [resuelto en D54].
 
 **D34 · Tarea 10c: cinco llamadas propuestas y el umbral de F0.1** (2026-11-17) · autodecidida
 por el orquestador; revisable
@@ -1575,7 +1575,7 @@ orquestador; revisable
   `test_case_b_through_the_node`, `test_node_passes_the_message_text`,
   `test_message_text_joins_text_parts` y `test_one_log_line_per_turn`.
 - **Pendiente:** D11.1 sigue sin implementar (tarea 08b): dos operaciones de la tool pendiente
-  siguen con la pregunta de D11. Redacción, sin tarea (revisión de la tarea 08, nota 7): un
+  siguen con la pregunta de D11 [resuelto en D54]. Redacción, sin tarea (revisión de la tarea 08, nota 7): un
   valor que termina en punto da "..", la nota usa la grafía que llegó y un `relative_days`
   negativo se muestra "-1 días desde hoy"; la 09a ya tiene el recorte de espacios. [recorte
   de espacios resuelto en D44]
@@ -2026,3 +2026,70 @@ el orquestador; revisable
   - *Copia de D3:* cuatro actos sueltos (`cancel` en la regla 1, `reject` y `provide_info` en
     la 4, `provide_info` en la 2) no tienen test propio; la 13 pone un caso por acto al
     reemplazar la copia (ronda 3, nota 1).
+
+**D54 · Tarea 08b: la fusión de D11.1 en el turno** (2026-11-17) · autodecidida por el
+orquestador; revisable
+
+- **Decisión:** `core/turn.py` aplica D11.1 y D35 tal como están escritas: en `_decide`, antes de
+  la pregunta de D11 y solo si el turno es *Misma tool*, `_join_split_operations` une las
+  operaciones de una tool pendiente cuyos `args` no comparten ninguna clave y traen el mismo
+  `depends_on`, y la operación unida sigue por la fusión, la validación y la respuesta de una sola
+  operación (D4, D39, D42, D47). Los detalles no cambian lo que D11.1 decide, así que van en una
+  línea cada uno (regla del autor desde la tarea 07):
+  - *Predicado único:* la condición de *Misma tool* (registro en `collecting` o
+    `awaiting_confirmation`, `act` `request_action` o `provide_info`, toda operación de una tool
+    pendiente) se escribe una vez, en `_is_same_tool`, y la usan la unión y la rama.
+  - *Claves (pendiente (a) de D11.1):* se cuentan tras `filter_by_registry` y tras quitar los
+    ausentes (`drop_absent`, D4 regla 2); los `args` unidos son los de cada operación sin
+    ausentes, así un `""` de una operación nunca pisa el valor de otra. Cada cubeta `_add` y
+    `_remove` es una clave propia.
+  - *`depends_on` (pendiente (b)):* nulo frente a uno con valor cuenta como distinto (D35).
+  - *Candidatas (pendiente (c)):* `awaiting_clarification` no entra en `_is_same_tool`, así que
+    una candidata de una aclaración no es tool pendiente; la 13 lo conserva.
+  - *Tres o más operaciones:* se une el grupo entero de una tool solo si ninguna pareja repite
+    clave y todas traen el mismo `depends_on`; si no, el grupo queda como llegó y pregunta D11.
+    Nunca se une una parte.
+  - *`certainty`:* la operación unida toma la de la primera; *Misma tool* no la lee (D2, D35).
+  - *Orden:* los `args` unidos conservan el orden de llegada; solo hace determinístico el
+    resultado, porque las claves son disjuntas.
+  - *Log:* sin clave nueva. `ops=` lista las operaciones como las devolvió el intérprete, así que
+    dos de la misma tool junto a `route=same_tool` muestran la unión (D21, D42).
+  - *Dónde vive:* en `core/turn.py`, junto a `_decide`; no en `core/merge.py`, que trabaja sobre
+    los `args` de un paso y no sabe de operaciones ni de lo pendiente (D4 regla 1).
+  - *Evidencia:* `test_measured_l4_is_joined` lee la salida cruda de `L4` del JSONL versionado
+    `phase0/runs/20261117T073844Z-gemini-3.5-flash-lite.jsonl` (D32), con `"message": null`.
+- **Lo que ve el usuario:** con la reunión con Juan pendiente, "Quita a Juan y agrega a Ana"
+  partido en dos operaciones recibe la misma respuesta y el mismo estado que una sola operación
+  (la de `L4`), en vez de "¿por cuál empiezo?". Con `awaiting_confirmation`, una corrección
+  partida vuelve a mostrar la confirmación con hash nuevo. Dos operaciones de la tool pendiente
+  que quedan sin ninguna clave tras quitar ausentes se unen en una operación vacía: el turno
+  repite la pregunta pendiente sin tocar el estado, como D40, donde antes respondía D11
+  (revisión de la tarea 08b, ronda 1, nota 3). Con una tool fuera del catálogo, la línea de D10
+  se antepone como hoy (D41). Nada se ejecuta: un `confirm` con operaciones partidas sigue en
+  D11 (TASK.md líneas 182 y 282-284).
+- **Alcance real:** "dos tickets pedidos no se vuelven uno" vale solo fuera de *Misma tool*. Con
+  un ticket pendiente, "Crea un ticket titulado Servidor caído y otro de prioridad alta" como dos
+  `create_ticket` de claves disjuntas entra por *Misma tool* y las dos se unen en el ticket
+  pendiente. Es D11.1 al pie de la letra y la limitación que D4 ya lista ("Crea otro ticket" con
+  un ticket pendiente actualiza el pendiente); nada corre sin la confirmación que muestra los
+  valores (TASK.md líneas 128-134, 282 y 413). Revisión de la tarea 08b, ronda 1, nota 2.
+- **Motivo:** TASK.md líneas 143-145 y 179-180 piden actualizar lo recopilado con lo nuevo y
+  volver a validar; la línea 413, no mezclar argumentos de dos operaciones, y la unión solo
+  ocurre dentro de una tool ya pendiente. La regla lee claves y `depends_on`, nunca nombres de
+  tool (línea 562).
+- **Resuelve:** los tres pendientes de D11.1 y el *Pendiente* de D42 ("D11.1 sigue sin
+  implementar").
+- **Lo prueban:** `test_measured_l4_is_joined` (`request_action` y `provide_info`; la segunda
+  operación `explicit` y `plausible`), `test_split_ops_ignore_absent_keys`,
+  `test_split_ops_while_awaiting_confirmation`, `test_overlapping_split_ops_follow_d11` (claves
+  repetidas, `depends_on` nulo frente a uno con valor y dos valores distintos),
+  `test_split_ops_outside_same_tool_follow_d11` (turno mixto, nada pendiente, otra tool pendiente
+  y `confirm`) y `test_two_operations_of_one_tool_follow_d11`, sin cambios.
+- **Pendiente:**
+  - *README (tarea 19):* la limitación del *Alcance real*, y la frase de defensa acotada a "fuera
+    de la rama *Misma tool*"; el docstring de `core/turn.py` (paso 2) dice "two requested
+    tickets never become one" sin esa salvedad.
+  - *Tres operaciones:* ningún test trae tres operaciones de la misma tool; una regresión que
+    uniera solo el subgrupo disjunto no la vería nadie (nota 1). La operación vacía de *Lo que ve
+    el usuario* tampoco tiene test (nota 3).
+  - *Tamaño:* `core/turn.py` tiene 471 líneas (D50, *Pendiente*).
