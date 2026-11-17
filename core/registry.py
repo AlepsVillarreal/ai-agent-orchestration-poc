@@ -70,9 +70,9 @@ class IdLink:
     """A tool receives the result ID of another tool of the same plan (D8.2, D25).
 
     Declared on the receiving tool. `source` names the producing tool, whose ID is the value of
-    its `result_id_field`; `field` is the receiver's own field that gets the ID at its end (task
-    14b adds it). The plan reads this to infer a dependency the model did not report (D8.4), so
-    no tool name is written in the core (TASK.md line 562).
+    its `result_id_field`; `field` is the receiver's own field that gets the ID at its end when
+    the plan runs (`core/plan.py`, `received_values`). The plan reads this to infer a dependency
+    the model did not report (D8.4), so no tool name is written in the core (TASK.md line 562).
     """
 
     source: str  # the tool that produces the ID: "create_ticket"

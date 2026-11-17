@@ -1,4 +1,5 @@
 """Task 14a: the order of a plan and the ID link the registry declares (D8.1, D8.2, D8.4, D25).
+Task 14b: what a step receives from the step it depends on (D8.2, D85).
 
 Pure core, no ADK, no model: `core/plan.py` on operations as `filter_by_registry` gives them.
 """
@@ -9,7 +10,7 @@ import pytest
 
 from core.interpretation import TurnInterpretation
 from core.operations import filter_by_registry
-from core.plan import plan_order
+from core.plan import plan_order, received_values, receives_from
 from core.registry import TOOLS, FieldKind, IdLink, ToolSpec
 from tests.interpretations import FIXED
 
@@ -226,3 +227,49 @@ def test_inference_follows_the_registry(monkeypatch):
         [f"{MEETING}<{NOTICE}:inferred"],
     )
     assert order_of(ops((TICKET, None), (NOTICE, None))) == ([TICKET, NOTICE], [None, None], [])
+
+
+# Brief 14b ------------------------------------------------------------------------------------
+
+NOTICE_VALUES = {"recipient": "Carlos", "message": "ya se registró la falla", "channel": "email"}
+
+
+# 1 (decision C; D8.2, D85, D25)
+def test_received_values(monkeypatch):
+    values = dict(NOTICE_VALUES)
+
+    linked = received_values(NOTICE, TICKET, values, {TICKET: "TCK-1"})
+    assert linked == {**NOTICE_VALUES, "message": "ya se registró la falla (ticket TCK-1)"}
+    assert receives_from(NOTICE, TICKET) == TOOLS[NOTICE].receives_id
+
+    # No dependency, a dependency on another tool, or no ID of the producer: as they came.
+    for depends_on, ids in [
+        (None, {TICKET: "TCK-1"}),
+        (MEETING, {TICKET: "TCK-1", MEETING: "MTG-1"}),
+        (TICKET, {}),
+        (TICKET, {MEETING: "MTG-1"}),
+    ]:
+        assert received_values(NOTICE, depends_on, values, ids) == NOTICE_VALUES, depends_on
+    assert receives_from(NOTICE, None) is None and receives_from(NOTICE, MEETING) is None
+    # A tool that declares no link never receives anything.
+    ticket_values = {"title": "x", "description": "y", "priority": "high", "assignee": "Carlos"}
+    assert received_values(TICKET, NOTICE, ticket_values, {NOTICE: "NTF-1"}) == ticket_values
+    assert receives_from(TICKET, NOTICE) is None
+
+    assert values == NOTICE_VALUES  # never changed in place
+
+    # Another declared link, and none on the notice: `core/plan.py` follows it unchanged (D25).
+    monkeypatch.setitem(TOOLS, NOTICE, dataclasses.replace(TOOLS[NOTICE], receives_id=None))
+    monkeypatch.setitem(
+        TOOLS,
+        MEETING,
+        dataclasses.replace(TOOLS[MEETING], receives_id=IdLink(source=NOTICE, field="title")),
+    )
+    meeting = {"title": "Revisión", "attendees": ["Juan"]}
+
+    assert received_values(MEETING, NOTICE, meeting, {NOTICE: "NTF-9"}) == {
+        "title": "Revisión (notificación NTF-9)",
+        "attendees": ["Juan"],
+    }
+    assert received_values(NOTICE, TICKET, NOTICE_VALUES, {TICKET: "TCK-1"}) == NOTICE_VALUES
+    assert meeting == {"title": "Revisión", "attendees": ["Juan"]}

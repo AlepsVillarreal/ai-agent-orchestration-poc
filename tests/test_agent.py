@@ -993,11 +993,13 @@ async def _conversation(runner, sessions, session_id, messages, caplog):
     return answers, lines, records
 
 
-# 15 (case E until the plan's confirmation, TASK.md lines 378-386)
-async def test_case_e_reaches_the_plan_confirmation(monkeypatch, caplog):
+# 15 (case E, TASK.md lines 374-392), task 14b's test 11: the plan's "yes" (`E3`) runs the ticket,
+# then the notice with the ticket's number at the end of its message, and reports both.
+async def test_case_e_through_the_node(monkeypatch, caplog):
     calls = record_tools(monkeypatch)
+    results = record_results(monkeypatch)
     caplog.set_level(logging.INFO, logger="assistant")
-    keys = ("E1", "E2", "G2")
+    keys = ("E1", "E2", "E3")
     fake = ScriptedLlm(script=[json.dumps(FIXED[key].interpretation) for key in keys])
     runner, sessions = make_runner(fake)
 
@@ -1005,7 +1007,7 @@ async def test_case_e_reaches_the_plan_confirmation(monkeypatch, caplog):
     answers, lines, records = await _conversation(runner, sessions, "s-ce", messages, caplog)
 
     assert fake.calls == 3
-    plan, ready, still = records
+    plan, ready, after = records
     assert answers[0].endswith(E1_QUESTION)
     assert plan["tools"] == ["create_ticket", "send_notification"]
     assert plan["steps"][1]["depends_on"] == "create_ticket"
@@ -1013,16 +1015,73 @@ async def test_case_e_reaches_the_plan_confirmation(monkeypatch, caplog):
     assert ready["status"] == "awaiting_confirmation"
     assert ID_LINK_LINE in answers[1].split("\n")
     assert answers[1].endswith(ready["last_question"])
-    assert answers[2].split("\n")[0] == replies.PLAN_NOT_RUN_YET
-    assert answers[2].split("\n")[1:] == answers[1].split("\n")[3:]  # the confirmation again
-    assert still == ready
-    assert all(not args for args in calls.values())
+
+    [ticket], [notice] = results["create_ticket"], results["send_notification"]
+    ticket_id, notice_id = ticket["ticket_id"], notice["notification_id"]
+    assert answers[2] == (
+        f"Listo: creé el ticket {ticket_id}.\nListo: envié la notificación {notice_id}."
+    )
+    [notice_args] = calls["send_notification"]
+    assert notice_args["message"] == f"ya se registró la falla (ticket {ticket_id})"
+    assert [len(calls[name]) for name in TOOLS] == [1, 0, 1]
+    assert after is None
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-ce")
+    [entry] = session.state["history"]
+    assert entry["operation_id"] == plan["operation_id"] and entry["status"] == "completed"
+    assert [(step["tool"], step["outcome"]) for step in entry["steps"]] == [
+        ("create_ticket", "ran"),
+        ("send_notification", "ran"),
+    ]
 
     assert "route=R3 depends=send_notification<create_ticket invalid=" in lines[0]
     assert "route=same_tool " in lines[1] and "depends=" not in lines[1]
-    assert "route=confirm_plan_provisional " in lines[2] and "depends=" not in lines[2]
+    ticket_key = execution_key("s-ce", "create_ticket", calls["create_ticket"][0])
+    notice_key = execution_key("s-ce", "send_notification", notice_args)
+    assert (
+        f"route=confirmed results=create_ticket:{ticket_id}:ran,"
+        f"send_notification:{notice_id}:ran idem={ticket_key},{notice_key} "
+    ) in lines[2]
+    assert "depends=" not in lines[2]
     for line in lines:
         assert f"op={plan['operation_id']}" in line
+
+
+# Task 14b's test 12 (D8.3; TASK.md line 270): the notice fails, as `MOCK_FAIL` makes it fail.
+async def test_partial_failure_through_the_node(monkeypatch, caplog):
+    spec = TOOLS["send_notification"]
+    failing = simulated(spec.contract, spec.result_id_field, "failure")
+    monkeypatch.setitem(TOOLS, "send_notification", dataclasses.replace(spec, execute=failing))
+    calls = record_tools(monkeypatch)
+    results = record_results(monkeypatch)
+    caplog.set_level(logging.INFO, logger="assistant")
+    keys = ("E1", "E2", "E3")
+    fake = ScriptedLlm(script=[json.dumps(FIXED[key].interpretation) for key in keys])
+    runner, sessions = make_runner(fake)
+
+    messages = [FIXED[key].message for key in keys]
+    answers, lines, _ = await _conversation(runner, sessions, "s-ce-fail", messages, caplog)
+
+    [ticket] = results["create_ticket"]
+    ticket_id = ticket["ticket_id"]
+    assert answers[2] == (
+        f"Listo: creé el ticket {ticket_id}.\n"
+        "No pude enviar una notificación: la herramienta respondió con un error. "
+        "Si me lo pides de nuevo, lo intento otra vez."
+    )
+    assert len(calls["send_notification"]) == 1
+    assert (
+        f"route=confirmed results=create_ticket:{ticket_id}:ran,send_notification:-:failed idem="
+    ) in lines[2]
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-ce-fail")
+    [entry] = session.state["history"]
+    assert entry["status"] == "failed"
+    assert [(step["tool"], step["outcome"]) for step in entry["steps"]] == [
+        ("create_ticket", "ran"),
+        ("send_notification", "failed"),
+    ]
+    [notice_args] = calls["send_notification"]
+    assert notice_args["message"] == f"ya se registró la falla (ticket {ticket_id})"
+    assert session.state["pending"] is None
 
 
 # 16 (D8.4: "el log anota que la dependencia se infirió")

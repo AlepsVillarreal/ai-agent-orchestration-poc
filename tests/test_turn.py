@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 
 from core import mock_tools, replies
-from core import turn as core_turn
 from core.confirmation import confirmation_hash, shown_values
 from core.executions import InMemoryExecutions, execution_key, settled
 from core.instruction import pending_summary
@@ -1892,45 +1891,75 @@ def test_same_values_in_another_session_run_again(monkeypatch):
     assert set(executions.snapshot()) == {h1_key(SESSION), h1_key("s-other")}
 
 
-def two_step_record() -> dict:
-    """A plan awaiting confirmation, by hand (plans are task 14a): a ticket, then a notice."""
-    ticket = handle_fixed(None, "H1").state_delta["pending"]["steps"][0]
-    notice = g1_pending()["steps"][0]
-    steps = [ticket, notice]
-    return {
-        "operation_id": "op-plan",
-        "tools": ["create_ticket", "send_notification"],
-        "steps": steps,
-        "status": "awaiting_confirmation",
-        "missing": [],
-        "invalid": [],
-        "last_question": replies.confirmation_question([TOOLS[s["tool"]] for s in steps]),
-        "confirmation_hash": confirmation_hash(shown_values(steps, NOW)),
-    }
+SKIPPED_NOTICE = "No intenté enviar una notificación porque un paso anterior no se completó."
 
 
-# 11 (note (bbb) at the seam; TASK.md line 270, D8.1): a step that does not end done stops the
-# steps after it. Since task 14a a "yes" to a plan stops before the seam (decision F) until task
-# 14b, so the seam is called directly; through `handle_turn` see
-# test_yes_to_a_plan_runs_nothing_yet.
+# 11 (note (bbb); TASK.md line 270, D8.1, D8.3): a step that does not end done stops the steps
+# after it. Task 14b ((A22)): back through `handle_turn`, with a "yes" to the plan of `E2`; the
+# step not tried gets its line and a `skipped` entry (decision B of brief 14b).
 @pytest.mark.parametrize("mode", ["failure", "timeout"])
 def test_steps_after_one_that_does_not_complete_never_run(monkeypatch, mode):
     tickets = counting(monkeypatch, "create_ticket", failure_mock("create_ticket", mode))
     notices = counting(monkeypatch, "send_notification")
     executions = InMemoryExecutions()
-    turn_input = TurnInput(FIXED["G2"].message, NOW, SESSION)
+    ready = e2_pending()
 
-    outcome = core_turn._run_confirmed(two_step_record(), turn_input, (), executions)
+    outcome = turn_in(ready, "E3", executions)
 
     assert outcome.route == "confirmed"
     assert len(tickets) == 1 and notices == []
-    [entry] = outcome.state_delta["history"]
     status = "failed" if mode == "failure" else "uncertain"
+    assert outcome.reply == "\n".join(
+        [FAILED_H1 if mode == "failure" else UNCERTAIN_H1, SKIPPED_NOTICE]
+    )
+    assert outcome.state_delta["pending"] is None
+    [entry] = outcome.state_delta["history"]
     assert entry["status"] == status
     assert [(step["tool"], step["outcome"]) for step in entry["steps"]] == [
-        ("create_ticket", status)
+        ("create_ticket", status),
+        ("send_notification", "skipped"),
     ]
-    assert outcome.reply == (FAILED_H1 if mode == "failure" else UNCERTAIN_H1)
+    [_, confirmed_notice] = shown_values(ready["steps"], NOW)
+    assert entry["steps"][1] == {
+        "tool": "send_notification",
+        "values": confirmed_notice["normalized"],  # the confirmed values: no ID to append
+        "outcome": "skipped",
+        "result": None,
+    }
+    assert [(run.tool, run.outcome) for run in outcome.results] == [("create_ticket", status)]
+
+
+# Review 14b-1, note 2: in a plan of three, every step after the stop is skipped, and with no
+# stop the notice still gets the ticket's number with the meeting in between (D8.1, D8.2).
+@pytest.mark.parametrize("mode", ["failure", None])
+def test_plan_of_three(monkeypatch, mode):
+    if mode:
+        counting(monkeypatch, "create_ticket", failure_mock("create_ticket", mode))
+    calls = record_tools(monkeypatch)
+    three = interpretation(
+        "request_action",
+        FIXED["H1"].interpretation["operations"][0],
+        _meeting().model_dump()["operations"][0],
+        FIXED["G1"].interpretation["operations"][0],
+    )
+    message = f"{FIXED['H1'].message}, {_COMPLETE_MEETING_MESSAGE} y {FIXED['G1'].message}"
+    ready = handle(None, three, message).state_delta["pending"]
+    assert ready["tools"] == ["create_ticket", "schedule_meeting", "send_notification"]
+
+    outcome = handle(ready, fixed("E3"), FIXED["E3"].message)
+
+    [entry] = outcome.state_delta["history"]
+    if mode:
+        assert calls["schedule_meeting"] == [] and calls["send_notification"] == []
+        assert _lines(outcome.reply)[1:] == [
+            "No intenté programar una reunión porque un paso anterior no se completó.",
+            SKIPPED_NOTICE,
+        ]
+        assert [step["outcome"] for step in entry["steps"]] == ["failed", "skipped", "skipped"]
+    else:
+        ticket_id = outcome.results[0].result_id
+        assert calls["send_notification"][0]["message"].endswith(f" (ticket {ticket_id})")
+        assert [step["outcome"] for step in entry["steps"]] == ["ran", "ran", "ran"]
 
 
 class CountingResult(dict):
@@ -2638,7 +2667,9 @@ def test_plan_confirmation_line_and_hash(monkeypatch):
     assert record["status"] == "awaiting_confirmation"
     assert record["confirmation_hash"] != ready["confirmation_hash"]
     assert record["steps"][1]["depends_on"] == "create_ticket"
-    for outcome in (repeated, corrected, handle_fixed(ready, "G2")):
+    # Task 14b: a "yes" (`G2`) no longer repeats the confirmation behind D86's brake; it runs the
+    # plan (test_yes_runs_the_plan).
+    for outcome in (repeated, corrected):
         lines = _lines(outcome.reply)
         assert lines.count(ID_LINK_LINE) == 1
         assert lines[lines.index(ID_LINK_LINE) - 1] == "- El canal: correo"
@@ -2692,31 +2723,60 @@ def test_r2_ignores_depends_on():
     ]
 
 
-# 8 (decision F): a "yes" to a plan runs nothing until task 14b.
+# 8 (decision F of brief 14a), rewritten in task 14b as its test 2 (D8.1, D8.2, D7.4; TASK.md
+# lines 265-268 and 388-392): a "yes" to the plan runs it, the ticket first, and the notice gets
+# the ticket's number at the end of its message. `confirms_tool` may name any tool of the plan.
 @pytest.mark.parametrize("confirms_tool", [None, "send_notification", "create_ticket"])
-def test_yes_to_a_plan_runs_nothing_yet(monkeypatch, confirms_tool):
+def test_yes_runs_the_plan(monkeypatch, confirms_tool):
     calls = record_tools(monkeypatch)
     ready = e2_pending()
+    ticket_values, notice_values = (s["normalized"] for s in shown_values(ready["steps"], NOW))
 
-    outcome = handle(ready, confirm(confirms_tool=confirms_tool), FIXED["G2"].message)
+    outcome = handle(ready, confirm(confirms_tool=confirms_tool), FIXED["E3"].message)
 
-    assert outcome.route == "confirm_plan_provisional"
-    assert outcome.reply == f"{replies.PLAN_NOT_RUN_YET}\n{plan_confirmation(ready)}"
-    assert outcome.state_delta == {}  # reassessed against `now`: nothing changed (D57)
-    assert outcome.results == []
-    assert nothing_ran(calls)
+    assert outcome.route == "confirmed"
+    [ticket_args] = calls["create_ticket"]
+    assert ticket_args == ticket_values
+    ticket_id = outcome.results[0].result_id
+    [notice_args] = calls["send_notification"]
+    assert notice_args == {
+        **notice_values,
+        "message": f"ya se registró la falla (ticket {ticket_id})",
+    }
+    assert calls["schedule_meeting"] == []
+    notice_id = outcome.results[1].result_id
+    assert outcome.reply == (
+        f"Listo: creé el ticket {ticket_id}.\nListo: envié la notificación {notice_id}."
+    )
+    assert outcome.state_delta["pending"] is None
+    [entry] = outcome.state_delta["history"]
+    assert entry["operation_id"] == ready["operation_id"]
+    assert entry["status"] == "completed"
+    assert [(s["tool"], s["outcome"]) for s in entry["steps"]] == [
+        ("create_ticket", "ran"),
+        ("send_notification", "ran"),
+    ]
+    assert [s["values"] for s in entry["steps"]] == [ticket_args, notice_args]  # D59
+    assert entry["steps"][0]["result"]["ticket_id"] == ticket_id
+    assert [(r.tool, r.values) for r in outcome.results] == [
+        ("create_ticket", ticket_args),
+        ("send_notification", notice_args),
+    ]
 
 
 def test_yes_to_a_plan_naming_another_tool_is_vetoed(monkeypatch):
     calls = record_tools(monkeypatch)
     ready = e2_pending()
 
-    for turn in (fixed("G2"), confirm(confirms_tool="schedule_meeting")):
-        outcome = handle(ready, turn, FIXED["G2"].message)
-        expected = "confirm_vetoed" if turn.confirms_tool else "confirm_plan_provisional"
-        assert outcome.route == expected
-        assert outcome.state_delta == {}
+    vetoed = handle(ready, confirm(confirms_tool="schedule_meeting"), FIXED["G2"].message)
+    assert vetoed.route == "confirm_vetoed"
+    assert vetoed.state_delta == {}
     assert nothing_ran(calls)
+
+    # Since task 14b, a "yes" without a tool runs the plan (it was the brake of D86).
+    ran = handle(ready, fixed("G2"), FIXED["G2"].message)
+    assert ran.route == "confirmed"
+    assert [len(calls[name]) for name in ("create_ticket", "send_notification")] == [1, 1]
 
 
 # 9 (D7.3, D3.1, D65)
@@ -2828,3 +2888,209 @@ def test_request_action_with_another_tool_still_takes_the_whole_turn(monkeypatch
         *TICKET_ONLY_STEPS,
     ]
     assert nothing_ran(calls)
+
+
+# Brief 14b ------------------------------------------------------------------------------------
+
+FAILED_NOTICE = (
+    "No pude enviar una notificación: la herramienta respondió con un error. "
+    "Si me lo pides de nuevo, lo intento otra vez."
+)
+UNCERTAIN_NOTICE = (
+    "No pude confirmar si llegué a enviar una notificación; "
+    "no lo voy a reintentar para no duplicarlo."
+)
+E2_MESSAGE = "ya se registró la falla"
+
+
+def run_plan(executions: InMemoryExecutions, history: list[dict] | tuple = ()) -> TurnOutcome:
+    """Case E in `SESSION`: `E1`, `E2` and the "yes" `E3`, with `executions`."""
+    pending = turn_in(None, "E1", executions).state_delta["pending"]
+    pending = turn_in(pending, "E2", executions).state_delta["pending"]
+    return turn_in(pending, "E3", executions, history=history)
+
+
+def confirmed_values(record: dict) -> list[dict]:
+    """The normalized values each step of a record awaiting confirmation shows (D7.1)."""
+    return [step["normalized"] for step in shown_values(record["steps"], NOW)]
+
+
+def _e2_turn() -> TurnOutcome:
+    return handle_fixed(e1_pending(), "E2")
+
+
+def _notice_after_meeting_turn() -> TurnOutcome:
+    after_meeting = {
+        **FIXED["G1"].interpretation["operations"][0],
+        "depends_on": "schedule_meeting",
+    }
+    turn = interpretation("request_action", _meeting().model_dump()["operations"][0], after_meeting)
+    return handle(None, turn, f"{FIXED['G1'].message} y {_COMPLETE_MEETING_MESSAGE}")
+
+
+def _ticket_and_meeting_turn() -> TurnOutcome:
+    turn = interpretation(
+        "request_action",
+        FIXED["H1"].interpretation["operations"][0],
+        _meeting().model_dump()["operations"][0],
+    )
+    return handle(None, turn, f"{FIXED['H1'].message} y {_COMPLETE_MEETING_MESSAGE}")
+
+
+# 3 (D85 <=> D8.2; decision C): the ID goes where the confirmation said it would, and only there.
+@pytest.mark.parametrize(
+    ("make_turn", "linked"),
+    [
+        (_e2_turn, True),
+        (_notice_after_meeting_turn, False),
+        (_ticket_and_meeting_turn, False),
+        (lambda: handle_fixed(None, "G1"), False),
+    ],
+    ids=["E2", "notice_after_meeting", "ticket_and_meeting", "G1"],
+)
+def test_id_goes_where_the_confirmation_said(monkeypatch, make_turn, linked):
+    calls = record_tools(monkeypatch)
+    shown = make_turn()
+    record = shown.state_delta["pending"]
+    assert record["status"] == "awaiting_confirmation"
+
+    outcome = handle(record, fixed("E3"), FIXED["E3"].message)
+
+    assert outcome.route == "confirmed"
+    assert [run.outcome for run in outcome.results] == ["ran"] * len(record["steps"])
+    received = [calls[step["tool"]][0] for step in record["steps"]]
+    changed = received != confirmed_values(record)
+    assert (ID_LINK_LINE in _lines(shown.reply)) == changed == linked
+
+
+# 4 (D8.3, D9.2, D9.3, D60; TASK.md lines 268-270; note (hhh) in a plan): step 2 fails or raises.
+@pytest.mark.parametrize("mode", ["failure", "timeout"])
+def test_step_two_failure_reports_both(monkeypatch, mode):
+    tickets = counting(monkeypatch, "create_ticket")
+    notices = counting(monkeypatch, "send_notification", failure_mock("send_notification", mode))
+    executions = InMemoryExecutions()
+
+    outcome = turn_in(e2_pending(), "E3", executions)
+
+    assert len(tickets) == 1 and len(notices) == 1
+    ticket, notice = outcome.results
+    status = "failed" if mode == "failure" else "uncertain"
+    assert notices[0]["message"] == f"{E2_MESSAGE} (ticket {ticket.result_id})"
+    assert outcome.reply == "\n".join(
+        [
+            f"Listo: creé el ticket {ticket.result_id}.",
+            FAILED_NOTICE if mode == "failure" else UNCERTAIN_NOTICE,
+        ]
+    )
+    assert outcome.state_delta["pending"] is None
+    [entry] = outcome.state_delta["history"]
+    assert entry["status"] == status
+    assert [(step["tool"], step["outcome"]) for step in entry["steps"]] == [
+        ("create_ticket", "ran"),
+        ("send_notification", status),
+    ]
+    expected = {ticket.key: {"status": "done", "result": ticket.result}}
+    if mode == "timeout":
+        expected[notice.key] = {"status": "started"}
+        assert entry["steps"][1]["error"] == "TimeoutError"
+    assert executions.snapshot() == expected
+
+
+# 6 (D9.3, D8.3; TASK.md lines 270-272 and 559; note 13 of backlog-04): asking again after step 2
+# failed reuses the ticket, whose stored ID gives the notice the same values and so the same key.
+@pytest.mark.parametrize("mode", ["failure", "timeout"])
+def test_retry_after_step_two_failed(monkeypatch, mode):
+    tickets = counting(monkeypatch, "create_ticket")
+    broken = counting(monkeypatch, "send_notification", failure_mock("send_notification", mode))
+    executions = InMemoryExecutions()
+    first = run_plan(executions)
+
+    healthy = counting(monkeypatch, "send_notification", mock_tools.send_notification)
+    second = run_plan(executions, history=first.state_delta["history"])
+
+    assert len(tickets) == 1 and len(broken) == 1
+    ticket_id = first.results[0].result_id
+    assert second.results[0].result_id == ticket_id
+    assert second.results[1].key == first.results[1].key
+    reused = f"Ya creé el ticket {ticket_id} con estos mismos datos; no lo repetí."
+    entries = second.state_delta["history"]
+    if mode == "failure":
+        [notice_args] = healthy
+        assert notice_args["message"] == f"{E2_MESSAGE} (ticket {ticket_id})"
+        notice_id = second.results[1].result_id
+        assert second.reply == f"{reused}\nListo: envié la notificación {notice_id}."
+        assert [entry["status"] for entry in entries] == ["failed", "completed"]
+        assert [step["outcome"] for step in entries[-1]["steps"]] == ["reused", "ran"]
+    else:  # the notice may have gone out: never run again (D9.2)
+        assert healthy == []
+        assert second.reply == f"{reused}\n{UNCERTAIN_NOTICE}"
+        assert [entry["status"] for entry in entries] == ["uncertain", "uncertain"]
+        assert [step["outcome"] for step in entries[-1]["steps"]] == ["reused", "uncertain"]
+
+
+# 7 (case H in a plan; D9.1; TASK.md lines 443-449): a plan asked for again after it ran.
+def test_repeated_plan_after_running(monkeypatch):
+    calls = record_tools(monkeypatch)
+    executions = InMemoryExecutions()
+    first = run_plan(executions)
+
+    second = run_plan(executions, history=first.state_delta["history"])
+
+    assert [len(calls[name]) for name in ("create_ticket", "send_notification")] == [1, 1]
+    ticket_id, notice_id = (run.result_id for run in first.results)
+    assert second.reply == (
+        f"Ya creé el ticket {ticket_id} con estos mismos datos; no lo repetí.\n"
+        f"Ya envié la notificación {notice_id} con estos mismos datos; no lo repetí."
+    )
+    assert [run.result_id for run in second.results] == [ticket_id, notice_id]
+    entries = second.state_delta["history"]
+    assert [entry["status"] for entry in entries] == ["completed", "completed"]
+    assert [step["outcome"] for step in entries[1]["steps"]] == ["reused", "reused"]
+
+
+# 8 (decision A of brief 14b, the author's answer (b)): another ticket with the same notice sends
+# the notice again, with its own ticket's number, under another key.
+def test_another_ticket_gets_its_own_notification(monkeypatch):
+    calls = record_tools(monkeypatch)
+    executions = InMemoryExecutions()
+    first = run_plan(executions)
+    other = json.loads(json.dumps(FIXED["E2"].interpretation))
+    other["operations"][0]["args"]["title"] = "Red caída"
+    message = FIXED["E2"].message.replace("Servidor caído", "Red caída")
+    assert message != FIXED["E2"].message
+
+    pending = turn_in(None, "E1", executions).state_delta["pending"]
+    pending = handle(pending, TurnInterpretation.model_validate(other), message)
+    history = first.state_delta["history"]
+    second = turn_in(pending.state_delta["pending"], "E3", executions, history=history)
+
+    ticket_ids = [first.results[0].result_id, second.results[0].result_id]
+    assert ticket_ids[0] != ticket_ids[1]
+    assert [args["message"] for args in calls["send_notification"]] == [
+        f"{E2_MESSAGE} (ticket {ticket_id})" for ticket_id in ticket_ids
+    ]
+    assert first.results[1].key != second.results[1].key
+    assert [run.outcome for run in second.results] == ["ran", "ran"]
+    notice_id = second.results[1].result_id
+    assert second.reply.endswith(f"\nListo: envié la notificación {notice_id}.")
+
+
+# 9 (D9.1, D62; decision A of brief 14b, (b)): the notice's key is over the values it received.
+def test_plan_execution_keys(monkeypatch):
+    calls = record_tools(monkeypatch)
+    executions = InMemoryExecutions()
+    ready = e2_pending()
+    ticket_values, notice_values = confirmed_values(ready)
+
+    outcome = turn_in(ready, "E3", executions)
+
+    [notice_args] = calls["send_notification"]
+    assert notice_args != notice_values
+    ticket_key = execution_key(SESSION, "create_ticket", ticket_values)
+    notice_key = execution_key(SESSION, "send_notification", notice_args)
+    ticket, notice = outcome.results
+    assert executions.snapshot() == {
+        ticket_key: {"status": "done", "result": ticket.result},
+        notice_key: {"status": "done", "result": notice.result},
+    }
+    assert [run.key for run in outcome.results] == [ticket_key, notice_key]

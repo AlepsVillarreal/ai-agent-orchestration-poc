@@ -41,8 +41,11 @@ class Executions(Protocol):
 def execution_key(session_id: str, tool: str, normalized: dict[str, Any]) -> str:
     """D9.1: sha256 of the canonical JSON of `[session_id, tool, normalized]`.
 
-    The same values the confirmation hash covers (D7.2) and the tool receives (D46). A hash, so
-    no user value is readable in the key or in the log line that shows it.
+    `normalized` are the values the tool receives (D46, D62). They equal the values the
+    confirmation hash covers (D7.2), except in the receiving step of a plan, whose values also
+    carry its producer's ID, which the hash never covers (D8.2; the author's answer A to brief
+    14b, option (b)). A hash, so no user value is readable in the key or in the log line that
+    shows it.
     """
     canonical = json.dumps([session_id, tool, normalized], sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

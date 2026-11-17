@@ -137,6 +137,10 @@ FIXED: dict[str, FixedTurn] = {
             ],
         },
     ),
+    # Case E, third message (own wording; decision E of brief 14b): the "yes" to the plan's
+    # confirmation, which TASK.md lines 378-392 do not show (D7.1). `confirms_tool` null, as
+    # `G2` came back from the real model (D32); the other values are in test_yes_runs_the_plan.
+    "E3": FixedTurn("Sí, adelante", {"act": "confirm", "operations": []}),
     # Case F, TASK.md lines 399 and 407.
     "F1": FixedTurn(
         "Agenda una reunión con Juan",

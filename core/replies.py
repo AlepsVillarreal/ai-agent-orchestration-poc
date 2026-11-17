@@ -1,8 +1,7 @@
 """Every Spanish reply of the agent, in one place (D2: replies only from templates).
 
 Tool-specific words (action phrases, field labels) come from the registry, never from here
-(TASK.md line 562). Templates marked *provisional* stand in for branches that later tasks
-build; they never start or run anything.
+(TASK.md line 562).
 """
 
 from collections.abc import Sequence
@@ -10,6 +9,7 @@ from typing import Any
 
 from core.history import FAILED, RAN, REUSED
 from core.merge import Change, Note
+from core.plan import receives_from
 from core.registry import TOOLS, FieldKind, FieldSpec, ToolSpec
 from core.validation import Cause
 
@@ -25,10 +25,6 @@ NO_PENDING_OPERATION = "No hay ninguna operación pendiente."
 # D3, *Lectura de la respuesta*, rule 1: a "no" or a "cancel" to a clarification. Nothing had
 # started, so it is not the discard line of D66 ("No voy a…").
 NO_ACTION_STARTED = "No inicié ninguna acción. Dime qué necesitas cuando quieras."
-
-# Provisional (decision F of brief 14a; task 14b removes it): a "yes" to a plan of two or more
-# steps runs nothing yet, because passing the ticket's number to the next step is task 14b.
-PLAN_NOT_RUN_YET = "Todavía no puedo ejecutar varias operaciones juntas; el plan sigue pendiente."
 
 # D1.1 *Fallos* and D2: the interpreter's output was broken, outside the schema or empty.
 # Nothing in the state changed (the turn node returns no state delta).
@@ -150,7 +146,8 @@ def confirmation_summary(shown: list[dict[str, Any]], depends_on: Sequence[str |
     registry order. A `word` value is shown by its Spanish label ("alta", "correo"), never by the
     canonical value the tool receives ("high", "email"). `depends_on` gives each step's
     dependency, in step order (none for a single operation): a step that depends on the tool its
-    registry says it receives an ID from gets `id_link_line` after its values (D8.2).
+    registry says it receives an ID from gets `id_link_line` after its values (D8.2), by the
+    same condition that appends the ID when the plan runs (`core/plan.py`, `receives_from`).
     """
     lines = []
     for index, step in enumerate(shown):
@@ -162,8 +159,7 @@ def confirmation_summary(shown: list[dict[str, Any]], depends_on: Sequence[str |
             for spec in tool.fields
             if spec.name in values
         ]
-        link = tool.receives_id
-        if link is not None and index < len(depends_on) and depends_on[index] == link.source:
+        if index < len(depends_on) and receives_from(tool.name, depends_on[index]) is not None:
             lines.append(id_link_line(tool))
     return "\n".join(lines)
 
@@ -221,6 +217,16 @@ def step_line(tool: ToolSpec, outcome: str, result_id: str | None) -> str:
         f"No pude confirmar si llegué a {tool.action_phrase}; "
         "no lo voy a reintentar para no duplicarlo."
     )
+
+
+def skipped_line(tool: ToolSpec) -> str:
+    """One line per step of a plan not tried, after the line of the step that stopped it (D8.1,
+    D8.3; decision B of brief 14b): the user hears about every operation (TASK.md line 268).
+    "Un paso anterior": in a plan of three, the third step's previous step was not tried either.
+
+    No values and no "Listo" (the word of a result, D48).
+    """
+    return f"No intenté {tool.action_phrase} porque un paso anterior no se completó."
 
 
 def _normalized_value(spec: FieldSpec, value: Any) -> str:

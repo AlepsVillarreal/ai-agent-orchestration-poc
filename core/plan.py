@@ -17,15 +17,22 @@ merged, in which order the steps go and which step each one depends on:
    place the first one whose dependency is already placed or that has none; repeat until all
    are placed. Stable, it orders a chain of three that came backwards, and needs no graph.
 
+It also decides what a step receives from the step it depends on (D8.2, D85): a step whose
+`depends_on` is the source of its registry's `receives_id` gets that producer's ID at the end of
+the declared field, after validation and after the hash, so neither `pending` nor the hash ever
+carry it (D4 rule 10). The same condition decides the confirmation line of D85, so the line is
+shown if and only if the ID is appended.
+
 It reads only tool names, `depends_on` and the registry's `receives_id`: never the message
 text, a value, the model's reason for an ambiguity, nor a tool name of its own (TASK.md line
 562), so a new link between two tools is one `IdLink` in the registry and no code here.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
-from core.registry import TOOLS
+from core.registry import TOOLS, IdLink
 
 IGNORED = "ignored"
 INFERRED = "inferred"
@@ -94,3 +101,28 @@ def _in_cycles(depends: dict[str, str]) -> list[str]:
         if tool == start:
             looped.append(start)
     return looped
+
+
+def receives_from(tool: str, depends_on: str | None) -> IdLink | None:
+    """The link along which a step gets its producer's ID, or None (D8.2, D85).
+
+    Only when the step depends on the tool its registry says it receives an ID from: a
+    notification alone, or one that depends on a meeting, receives nothing.
+    """
+    link = TOOLS[tool].receives_id
+    return link if link is not None and depends_on == link.source else None
+
+
+def received_values(
+    tool: str, depends_on: str | None, values: dict[str, Any], ids: Mapping[str, str]
+) -> dict[str, Any]:
+    """The values a step's tool receives: its confirmed `values`, with the producer's ID at the
+    end of the linked field when the step receives one and `ids` (by tool, the IDs this "yes"
+    already got) has it: "ya se registró la falla (ticket TCK-1)" (D8.2). A new dict; `values`
+    is not changed.
+    """
+    link = receives_from(tool, depends_on)
+    if link is None or link.source not in ids:
+        return dict(values)
+    suffix = f"({TOOLS[link.source].short_name} {ids[link.source]})"
+    return {**values, link.field: f"{values[link.field]} {suffix}"}

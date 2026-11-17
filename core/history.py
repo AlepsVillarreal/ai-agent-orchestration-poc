@@ -26,6 +26,9 @@ UNCERTAIN = "uncertain"  # it may or may not have happened; never run again (D9.
 RAN = "ran"  # the tool ran now and answered a success with its ID
 REUSED = "reused"  # the same execution was already done: the stored result, nothing ran (D9.1)
 DONE_OUTCOMES = (RAN, REUSED)
+# A plan step after the one that stopped it: never tried, so no key and no result (D8.1;
+# decision B of brief 14b). Listed after the steps tried; it never names the record's status.
+SKIPPED = "skipped"
 
 # Final status of a record closed without running anything (D6, D7.3, D3.1).
 CANCELLED = "cancelled"  # a "no" without arguments, or a "cancel" (also to a clarification)
@@ -35,11 +38,12 @@ ABANDONED = "abandoned"  # a change of intention: the turn asked for a tool that
 def step_entry(
     tool: str, values: dict[str, Any], outcome: str, result: Any, error: str | None = None
 ) -> dict[str, Any]:
-    """One tried step: `{tool, values, outcome, result}`, plus `error` after an exception.
+    """One step after a "yes": `{tool, values, outcome, result}`, plus `error` after an exception.
 
     `values` are the normalized values the tool received (final, unlike the `args` kept in
-    `pending`, D44). `result` is the dict the tool returned (the stored one when `reused`), or
-    None when there is none. `error` is the exception's type name, never its text.
+    `pending`, D44), with the producer's ID when the step receives one (D8.2); a `skipped` step
+    keeps its confirmed values. `result` is the dict the tool returned (the stored one when
+    `reused`), or None when there is none. `error` is the exception's type name, never its text.
     """
     entry = {"tool": tool, "values": values, "outcome": outcome, "result": result}
     if error is not None:
@@ -49,7 +53,7 @@ def step_entry(
 
 def closed_status(outcomes: Sequence[str]) -> str:
     """`completed` if every step ran or was reused, else the outcome of the step that stopped
-    the record (only the steps tried are listed, so it is the last one)."""
+    the record (given only the steps tried, it is the last one)."""
     return next((o for o in outcomes if o not in DONE_OUTCOMES), COMPLETED)
 
 
@@ -57,9 +61,10 @@ def closed_entry(record: dict, status: str, steps: list[dict[str, Any]]) -> dict
     """The history entry of a closed record: `{operation_id, status, steps}`.
 
     After a "yes", `steps` lists the steps that were tried, in step order, as `step_entry`
-    writes them. Closed without running (`cancelled`, `abandoned`), it is the record's own
-    `steps`, `{tool, args}`; a clarification, which has no steps, keeps its candidates in their
-    order as `{tool, args}`, steps never started (without `depends_on`, not an argument).
+    writes them, then the plan's steps not tried after a stop, as `skipped`. Closed without
+    running (`cancelled`, `abandoned`), it is the record's own `steps`, `{tool, args}`; a
+    clarification, which has no steps, keeps its candidates in their order as `{tool, args}`,
+    steps never started (without `depends_on`, not an argument).
     """
     return {"operation_id": record["operation_id"], "status": status, "steps": steps}
 

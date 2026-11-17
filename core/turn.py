@@ -28,11 +28,10 @@ Order of a turn (D3, *Compuerta de entrada*):
      runs (what D4 requires of D7); (4) still `collecting` -> repeat the question (D7.1);
      (5) the hash of the shown values must match (D7.2), else show them again with the new
      hash, after a line that says the values changed (author's answer on note (ddd));
-     a plan of two or more steps stops here until task 14b: a provisional line and the
-     confirmation again (decision F of brief 14a); (6) `_run_confirmed` runs each step under
-     its idempotency key (D9.1-D9.3), stops at the first step that does not end done, empties
-     `pending`, answers with one line per step tried and appends the record to `history` as
-     completed, failed or uncertain.
+     (6) `_run_confirmed` runs each step in plan order under its idempotency key (D9.1-D9.3),
+     a step that receives its producer's ID with it (D8.2), stops at the first step that does
+     not end done, empties `pending`, answers with one line per step (tried or not) and
+     appends the record to `history` as completed, failed or uncertain.
    - *Otra tool* (D3.1): S has a tool that is not pending and `act` is `request_action`,
      `provide_info`, `reject` or `cancel` -> the record goes to `history` as `abandoned` and the
      rules table runs on every operation of the turn against nothing stored, after the discard
@@ -94,16 +93,18 @@ from core.history import (
     ABANDONED,
     CANCELLED,
     DONE_OUTCOMES,
+    SKIPPED,
     UNCERTAIN,
     appended,
     closed_entry,
     closed_status,
+    step_entry,
 )
 from core.interpretation import Act, Certainty, TurnInterpretation
 from core.merge import MergeResult, merge_args
 from core.operations import filter_by_registry, join_split_operations
 from core.outcome import TurnInput, TurnOutcome
-from core.plan import plan_order
+from core.plan import plan_order, received_values
 from core.presence import drop_absent
 from core.registry import TOOLS, ToolSpec
 
@@ -161,9 +162,6 @@ def _decide(
             return _clarification_gate(pending, act, operations, turn_input, confirms_tool, history)
         if act == Act.CONFIRM:
             outcome = _confirm(pending, operations, turn_input, confirms_tool, dropped_some)
-            if outcome is None and len(pending["steps"]) > 1:  # decision F: until task 14b
-                outcome = _repeat_pending(pending, [], turn_input.now, "confirm_plan_provisional")
-                outcome.reply = f"{replies.PLAN_NOT_RUN_YET}\n{outcome.reply}"
             return outcome or _run_confirmed(pending, turn_input, history, executions)
         return _pending_gate(pending, act, operations, turn_input, history, same_tool)
 
@@ -469,16 +467,22 @@ def _confirm(
 def _run_confirmed(
     record: dict, turn_input: TurnInput, history: Sequence[dict], executions: Executions
 ) -> TurnOutcome:
-    """The only place in the code that runs a tool (D46), each step under its idempotency key:
-    session + tool + the normalized values confirmed (D9.1). A key already `done` gives its result
-    without running; one `started` is uncertain, never run again (D9.2). After the call,
-    `core/executions.py` stores `done`, releases the key after a failure (D9.3) or leaves it
-    `started`. The first step not done stops the rest (D8.1, TASK.md line 270). `pending` is
-    emptied (a repeated "yes" finds nothing, TASK.md line 284); the record goes to `history` (D6).
+    """The only place in the code that runs a tool (D46), each step in plan order under its
+    idempotency key: session + tool + the values the tool receives (D9.1, D62), which are the
+    confirmed ones plus, in a step that receives its producer's ID, that ID at the end of the
+    declared field (D8.2; the author's answer A to brief 14b). A key already `done` gives its
+    result without running, so a reused ticket hands its stored ID on (D9.3); one `started` is
+    uncertain, never run again (D9.2). After the call, `core/executions.py` stores `done`,
+    releases the key after a failure (D9.3) or leaves it `started`. The first step not done stops
+    the rest (D8.1, TASK.md line 270); each step not tried gets a line and a `skipped` entry
+    (decision B of brief 14b). `pending` is emptied (a repeated "yes" finds nothing, TASK.md line
+    286); the record goes to `history` (D6).
     """
-    runs = []
-    for step in shown_values(record["steps"], turn_input.now):
-        tool, values = TOOLS[step["tool"]], step["normalized"]
+    runs, ids = [], {}
+    confirmed = shown_values(record["steps"], turn_input.now)
+    for step, shown in zip(record["steps"], confirmed, strict=True):
+        tool = TOOLS[step["tool"]]
+        values = received_values(tool.name, step.get("depends_on"), shown["normalized"], ids)
         key = execution_key(turn_input.session_id, tool.name, values)
         stored = executions.reserve(key)
         if stored is not None:
@@ -493,10 +497,15 @@ def _run_confirmed(
         runs.append(run)
         if run.outcome not in DONE_OUTCOMES:
             break
-    status = closed_status([run.outcome for run in runs])
-    entry = closed_entry(record, status, [run.entry() for run in runs])
+        ids[tool.name] = run.result_id
+    skipped = confirmed[len(runs) :]  # after a stop: never tried, no key (D8.1)
+    lines = [replies.step_line(TOOLS[r.tool], r.outcome, r.result_id) for r in runs]
+    lines += [replies.skipped_line(TOOLS[step["tool"]]) for step in skipped]
+    steps = [run.entry() for run in runs]
+    steps += [step_entry(step["tool"], step["normalized"], SKIPPED, None) for step in skipped]
+    entry = closed_entry(record, closed_status([run.outcome for run in runs]), steps)
     return TurnOutcome(
-        "\n".join(replies.step_line(TOOLS[r.tool], r.outcome, r.result_id) for r in runs),
+        "\n".join(lines),
         state_delta={"pending": None, "history": appended(history, entry)},
         route="confirmed",
         results=runs,
