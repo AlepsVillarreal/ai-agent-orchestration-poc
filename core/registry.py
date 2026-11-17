@@ -137,8 +137,8 @@ TOOLS: dict[str, ToolSpec] = {
             FieldSpec(
                 name="date",
                 kind=FieldKind.DATE,
-                description="Meeting date, filled by its components exactly as the user "
-                "said them. Do not compute the date or complete missing parts.",
+                description="Meeting date. Fill its components as the user said them; "
+                "do not resolve them to a calendar date or complete missing parts.",
                 label="la fecha",
             ),
             FieldSpec(

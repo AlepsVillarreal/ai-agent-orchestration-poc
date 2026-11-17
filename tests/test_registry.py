@@ -164,6 +164,8 @@ def test_normalize_follows_d4(raw, expected):
         ("schedule_meeting", "date", "2026-11-40"),
         ("schedule_meeting", "date", "40/11/2026"),
         ("schedule_meeting", "time", "25:90"),
+        ("schedule_meeting", "time", "10:30 am"),  # the pattern is anchored
+        ("schedule_meeting", "duration_minutes", "30"),  # StrictInt, D13
         ("schedule_meeting", "attendees", []),
         ("create_ticket", "title", ""),
         ("schedule_meeting", "title", ""),
@@ -189,7 +191,7 @@ def test_contract_rejects_unknown_fields(canonical_args):
 def test_core_imports_no_adk():
     # A fresh process: in this one, another test may already have imported ADK.
     code = (
-        "import sys, core.registry, core.mock_tools; "
+        "import sys, core.registry, core.mock_tools, core.interpretation, core.instruction; "
         "print(sorted(m for m in sys.modules if m.startswith('google.adk')))"
     )
     result = subprocess.run(
