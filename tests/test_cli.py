@@ -24,10 +24,9 @@ import assistant.cli
 from assistant.agent import build_root_agent
 from assistant.cli import _without_password, chat
 from assistant.interpreter import build_interpreter
-from core import replies
 from core.instruction import pending_summary
 from core.interpretation import TurnInterpretation
-from core.turn import handle_turn
+from core.turn import TurnInput, handle_turn
 from tests.fake_llm import ScriptedLlm, system_text
 from tests.interpretations import FIXED
 
@@ -57,7 +56,9 @@ async def test_chat_prints_only_replies():
 
     text = out.getvalue()
     question = handle_turn(
-        None, TurnInterpretation.model_validate(FIXED["A1"].interpretation)
+        None,
+        TurnInterpretation.model_validate(FIXED["A1"].interpretation),
+        TurnInput(FIXED["A1"].message),
     ).reply
     assert text == f"> {FIXED['A1'].message}\n{question}\n"
     assert "{" not in text and '"act"' not in text  # nothing from the interpreter
@@ -108,14 +109,25 @@ async def test_run_creates_a_session_per_run_and_continues_it(redis_url, monkeyp
         assert await assistant.cli._run(None) == 0
         first = capsys.readouterr()
         [session_id] = _new_session_ids(first.err)
-        a1 = handle_turn(None, TurnInterpretation.model_validate(FIXED["A1"].interpretation))
+        a1 = handle_turn(
+            None,
+            TurnInterpretation.model_validate(FIXED["A1"].interpretation),
+            TurnInput(FIXED["A1"].message),
+        )
         assert first.out == f"> {FIXED['A1'].message}\n{a1.reply}\n"
 
         monkeypatch.setattr(sys, "stdin", io.StringIO(FIXED["B2"].message + "\n"))
         assert await assistant.cli._run(session_id) == 0
         second = capsys.readouterr()
         assert _new_session_ids(second.err) == []  # --session continues, no new session
-        assert second.out == f"> {FIXED['B2'].message}\n{replies.PENDING_NOT_SUPPORTED_YET}\n"
+        # Task 08: B2 merges into the record the first process saved (*Misma tool*).
+        b2 = handle_turn(
+            a1.state_delta["pending"],
+            TurnInterpretation.model_validate(FIXED["B2"].interpretation),
+            TurnInput(FIXED["B2"].message),
+        )
+        assert b2.route == "same_tool"
+        assert second.out == f"> {FIXED['B2'].message}\n{b2.reply}\n"
         # The second process saw the pending record saved by the first one.
         assert pending_summary(a1.state_delta["pending"]) in system_text(fake.requests[1])
 

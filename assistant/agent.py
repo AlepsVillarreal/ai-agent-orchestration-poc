@@ -3,7 +3,8 @@
 The turn node is the only place where ADK meets the pure core (D1.1, *Frontera*). Each turn it:
 1. reads the pending record from the session state (read only);
 2. calls the interpreter as a child node with `ctx.run_node` (D1: the LLM only interprets);
-3. hands the interpretation and the pending record to `core.turn.handle_turn`;
+3. hands the interpretation, the pending record and the message text (`TurnInput`) to
+   `core.turn.handle_turn`;
 4. returns exactly one `Event` with the template reply and the state change.
 
 The state is written only through that final event (`Event(state=...)` becomes
@@ -15,19 +16,23 @@ Importing this module opens no connection, needs no API key and does not load `.
 the CLI does that, so tests never see the real key.
 """
 
+import json
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 from google.adk import Context, Event, Workflow
 from google.adk.agents import LlmAgent
 from google.adk.apps import App
 from google.adk.workflow import node
+from google.genai import types
 from pydantic import ValidationError
 
 from assistant.interpreter import interpreter
 from core import replies
 from core.interpretation import TurnInterpretation
-from core.turn import handle_turn
+from core.merge import Change, Rejected
+from core.turn import TurnInput, handle_turn
 
 logger = logging.getLogger("assistant.turn")
 
@@ -52,17 +57,39 @@ def classify_failure(error: BaseException | None) -> str:
     return MODEL_UNAVAILABLE
 
 
+def message_text(node_input: Any) -> str:
+    """The user's text from the turn node's input.
+
+    For a new message the `Runner` hands the root workflow the `types.Content` it received
+    (`workflow/_node_runner_utils.py:136-141`, google-adk 2.14.1), and the workflow passes it
+    on to the node after START. Text parts are joined with a space so that two parts never glue
+    two words into one (D4 rule 3 compares whole words). Anything else gives "": every name of
+    the turn is then rejected, which costs a question, never an execution.
+    """
+    if isinstance(node_input, types.Content):
+        return " ".join(part.text for part in node_input.parts or [] if part.text)
+    return ""
+
+
+def _value(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
 def log_turn(
     session_id: str,
     route: str,
     interpretation: TurnInterpretation | None = None,
     error: str | None = None,
+    changes: Sequence[Change] = (),
+    rejected: Sequence[Rejected] = (),
 ) -> None:
     """One `key=value` line per turn. `route` comes from the core, never from the reply text.
 
     `ops` lists the operations as the interpreter returned them, before the registry filter, so
-    an unknown tool dropped by D10 stays visible. No argument value and no message text here.
-    `ambiguity` is the model's own free text (D2: logged, read by nothing).
+    an unknown tool dropped by D10 stays visible. The keys before `changes=` carry no argument
+    value and no message text. A turn the interpreter understood adds, at the end of the line,
+    `changes=` (`field:kind:old->new`, values as JSON; D4 rule 8) and `rejected=` (`key:name`;
+    D4 rule 3), then `ambiguity`, the model's own free text (D2: logged, read by nothing).
     """
     act = interpretation.act.value if interpretation else ""
     ops = ",".join(
@@ -72,6 +99,12 @@ def log_turn(
     parts = [f"session={session_id}", f"act={act}", f"ops={ops}", f"route={route}"]
     if error:
         parts.append(f"error={error}")
+    if interpretation:
+        parts.append(
+            "changes="
+            + ",".join(f"{c.field}:{c.kind}:{_value(c.old)}->{_value(c.new)}" for c in changes)
+        )
+        parts.append("rejected=" + ",".join(f"{r.key}:{_value(r.name)}" for r in rejected))
     if interpretation and interpretation.ambiguity_reason:
         parts.append(f"ambiguity={interpretation.ambiguity_reason!r}")
     logger.info(" ".join(parts))
@@ -107,8 +140,15 @@ def build_root_agent(interpreter: LlmAgent) -> Workflow:
         # ADK already validated `output` against the schema, so this does not fail.
         interpretation = TurnInterpretation.model_validate(output)
         # Outside the `try`: an error in the core is a bug and must surface as one.
-        outcome = handle_turn(pending, interpretation)
-        log_turn(ctx.session.id, outcome.route, interpretation)
+        turn_input = TurnInput(message=message_text(node_input))
+        outcome = handle_turn(pending, interpretation, turn_input)
+        log_turn(
+            ctx.session.id,
+            outcome.route,
+            interpretation,
+            changes=outcome.changes,
+            rejected=outcome.rejected,
+        )
         return Event(message=outcome.reply, state=outcome.state_delta)
 
     return Workflow(name="root_agent", edges=[("START", turn)])

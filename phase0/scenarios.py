@@ -21,7 +21,7 @@ from typing import Any
 
 from core.interpretation import TurnInterpretation
 from core.registry import TOOLS
-from core.turn import handle_turn
+from core.turn import TurnInput, handle_turn
 from tests.interpretations import FIXED
 
 
@@ -35,8 +35,9 @@ class Scenario:
 
 def _core_record(first_message: str) -> dict[str, Any]:
     """The pending record `handle_turn` creates for a first message, with nothing pending."""
-    interpretation = TurnInterpretation.model_validate(FIXED[first_message].interpretation)
-    return handle_turn(None, interpretation).state_delta["pending"]
+    fixed = FIXED[first_message]
+    interpretation = TurnInterpretation.model_validate(fixed.interpretation)
+    return handle_turn(None, interpretation, TurnInput(fixed.message)).state_delta["pending"]
 
 
 def _literal_record(tools: list[str], status: str, question: str) -> dict[str, Any]:

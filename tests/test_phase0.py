@@ -14,7 +14,7 @@ import assistant.interpreter
 import phase0.run
 from core.instruction import NOTHING_PENDING, pending_summary
 from core.interpretation import TurnInterpretation
-from core.turn import handle_turn
+from core.turn import TurnInput, handle_turn
 from phase0.run import format_report, run_scenarios, shape_failure, strip_code_fence
 from phase0.scenarios import CLARIFICATION_QUESTION, SCENARIOS
 from tests.fake_llm import ScriptedLlm, contents_text, quota_error, system_text
@@ -27,7 +27,9 @@ BY_ID = {scenario.id: scenario for scenario in SCENARIOS}
 
 def _core_record(key: str) -> dict:
     return handle_turn(
-        None, TurnInterpretation.model_validate(FIXED[key].interpretation)
+        None,
+        TurnInterpretation.model_validate(FIXED[key].interpretation),
+        TurnInput(FIXED[key].message),
     ).state_delta["pending"]
 
 

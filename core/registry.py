@@ -205,6 +205,17 @@ TOOLS: dict[str, ToolSpec] = {
 }
 
 
+def list_buckets(spec: FieldSpec) -> tuple[str, str]:
+    """The `(add, remove)` bucket keys of a `person_list` field (D2 amendment).
+
+    `attendees` -> `("attendees_add", "attendees_remove")`. The core builds these keys here
+    only, so the suffix is written once for `core/merge.py` and `core/turn.py`.
+    """
+    if spec.kind != FieldKind.PERSON_LIST:
+        raise ValueError(f"field {spec.name!r} is not a list and has no buckets")
+    return f"{spec.name}_add", f"{spec.name}_remove"
+
+
 def fields_of_kind(kind: FieldKind) -> list[tuple[str, FieldSpec]]:
     """All `(tool_name, field)` pairs of the given kind across `TOOLS`, in catalog order."""
     return [

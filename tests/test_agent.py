@@ -16,13 +16,13 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 import assistant.agent
-from assistant.agent import build_root_agent
+from assistant.agent import build_root_agent, message_text
 from assistant.interpreter import INTERPRETER_RETRY_OPTIONS, MODEL, build_interpreter
 from core import replies
 from core.instruction import NOTHING_PENDING
 from core.interpretation import TurnInterpretation
 from core.registry import TOOLS
-from core.turn import handle_turn
+from core.turn import TurnInput, handle_turn
 from tests.fake_llm import (
     ScriptedLlm,
     contents_text,
@@ -53,12 +53,29 @@ FLIGHT_AND_TICKET = (
 )
 
 
+# The model returns a name that "Alta, asígnalo a Carlos" does not contain (D4 rule 3).
+PEDRO_FOR_CARLOS = {
+    "act": "provide_info",
+    "operations": [
+        {
+            "tool": "create_ticket",
+            "certainty": "explicit",
+            "args": {"priority": "Alta", "assignee": "Pedro"},
+        }
+    ],
+}
+
+
 def fixed(key: str) -> TurnInterpretation:
     return TurnInterpretation.model_validate(FIXED[key].interpretation)
 
 
+def handle_fixed(pending: dict | None, key: str):
+    return handle_turn(pending, fixed(key), TurnInput(FIXED[key].message))
+
+
 def a1_record() -> dict:
-    return handle_turn(None, fixed("A1")).state_delta["pending"]
+    return handle_fixed(None, "A1").state_delta["pending"]
 
 
 def make_runner(fake, sessions=None) -> tuple[Runner, InMemorySessionService]:
@@ -80,7 +97,7 @@ def test_app_is_where_adk_web_looks():
 
 # 2
 async def test_case_a_end_to_end_through_the_node(monkeypatch):
-    expected = handle_turn(None, fixed("A1"))
+    expected = handle_fixed(None, "A1")
 
     def fail(args):
         pytest.fail(f"a tool ran with {args}")
@@ -148,20 +165,27 @@ async def test_one_log_line_per_turn(caplog):
             json.dumps(FIXED["C1"].interpretation),
             json.dumps(FLIGHT_AND_TICKET[1]),
             quota_error(),
+            json.dumps(FIXED["B1"].interpretation),
+            json.dumps(FIXED["B2"].interpretation),
+            json.dumps(PEDRO_FOR_CARLOS),
         ]
     )
     runner, _ = make_runner(fake)
     lines = {}
-    turns = {
-        "A1": FIXED["A1"].message,
-        "C1": FIXED["C1"].message,
-        "flight": FLIGHT_AND_TICKET[0],
-        "429": "Necesito crear un ticket",
-    }
+    # (key, session, message): B1 and B2 share a session, so B2 merges into B1's record.
+    turns = [
+        ("A1", "s-log-A1", FIXED["A1"].message),
+        ("C1", "s-log-C1", FIXED["C1"].message),
+        ("flight", "s-log-flight", FLIGHT_AND_TICKET[0]),
+        ("429", "s-log-429", "Necesito crear un ticket"),
+        ("B1", "s-log-B", FIXED["B1"].message),
+        ("B2", "s-log-B", FIXED["B2"].message),
+        ("rejected", "s-log-rejected", FIXED["B2"].message),
+    ]
     answers = {}
-    for key, text in turns.items():
+    for key, session_id, text in turns:
         caplog.clear()
-        events = await run_turn(runner, USER, f"s-log-{key}", text)
+        events = await run_turn(runner, USER, session_id, text)
         answers[key] = event_text(reply_events(events)[0])
         records = _turn_records(caplog)
         assert len(records) == 1, (key, records)
@@ -185,12 +209,85 @@ async def test_one_log_line_per_turn(caplog):
     assert "error=ClientError" in lines["429"]
     assert "act= ops= " in lines["429"]
 
-    # No argument value and no message text. `ambiguity` is the model's own free text, logged
-    # as D2 says, so it is left out of this check.
+    # D4 rules 3 and 8: the changes with their values and the rejected names with their key,
+    # at the end of the line.
+    assert "route=same_tool" in lines["B2"]
+    assert (
+        'changes=priority:fill:null->"Alta",assignee:fill:null->"Carlos" rejected=' in (lines["B2"])
+    )
+    assert lines["B2"].endswith("rejected=")
+    assert "route=R2" in lines["rejected"]
+    assert 'rejected=assignee:"Pedro"' in lines["rejected"]
+    assert "changes=" not in lines["429"]  # a failed turn has nothing to report
+
+    # No argument value and no message text before ` changes=`; `changes`, `rejected` and
+    # `ambiguity` (the model's own free text, logged as D2 says) come last on purpose.
     for line in lines.values():
-        without_ambiguity = line.split(" ambiguity=")[0]
-        assert "servidor" not in without_ambiguity
-        assert "Carlos" not in without_ambiguity
+        without_values = line.split(" changes=")[0]
+        for word in ("servidor", "Carlos", "Pedro", "Alta", "autenticación"):
+            assert word not in without_values
+
+
+def _no_tool_runs(monkeypatch) -> None:
+    def fail(args):
+        pytest.fail(f"a tool ran with {args}")
+
+    for name, spec in list(TOOLS.items()):
+        monkeypatch.setitem(TOOLS, name, dataclasses.replace(spec, execute=fail))
+
+
+# 13 (TASK.md lines 311-331): case B in one session, until every field is in
+async def test_case_b_through_the_node(monkeypatch):
+    _no_tool_runs(monkeypatch)
+    keys = ("B1", "B2", "B3")
+    fake = ScriptedLlm(script=[json.dumps(FIXED[key].interpretation) for key in keys])
+    runner, sessions = make_runner(fake)
+
+    replies_seen, expected, pending = [], [], None
+    for key in keys:
+        replies_seen.append(
+            event_text(reply_events(await run_turn(runner, USER, "s-b", FIXED[key].message))[0])
+        )
+        outcome = handle_fixed(pending, key)
+        expected.append(outcome.reply)
+        pending = outcome.state_delta.get("pending", pending)
+
+    assert replies_seen == expected
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-b")
+    record = session.state["pending"]
+    assert record == pending
+    assert record["steps"][0]["args"] == {
+        "title": "Falla de autenticación",
+        "description": "revisar el problema de autenticación",
+        "priority": "Alta",
+        "assignee": "Carlos",
+    }
+    assert record["missing"] == []
+    assert record["last_question"] is None
+    assert record["status"] == "collecting"
+    assert replies_seen[-1].endswith(replies.READY_NOT_AVAILABLE_YET)
+    assert fake.calls == 3
+
+
+# 14: with test 13 (Carlos gets in), this shows the core receives the real message text: the
+# same message rejects a name it does not contain.
+async def test_node_passes_the_message_text():
+    fake = ScriptedLlm(
+        script=[json.dumps(FIXED["B1"].interpretation), json.dumps(PEDRO_FOR_CARLOS)]
+    )
+    runner, sessions = make_runner(fake)
+
+    await run_turn(runner, USER, "s-pedro", FIXED["B1"].message)
+    events = await run_turn(runner, USER, "s-pedro", FIXED["B2"].message)
+
+    reply = event_text(reply_events(events)[0])
+    assert replies.REJECTED_NAME_LINE in reply.split("\n")
+    assert "Pedro" not in reply
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-pedro")
+    args = session.state["pending"]["steps"][0]["args"]
+    assert args["priority"] == "Alta"
+    assert "assignee" not in args
+    assert "assignee" in session.state["pending"]["missing"]
 
 
 # Note (o) of the task 04 review: no retry setting, and the turn node reruns on resume (D1.1).
@@ -287,7 +384,7 @@ async def test_http_retry_through_the_turn_node(script, error, caplog):
     [line] = _turn_records(caplog)  # one line per turn, retried or not
 
     if error is None:
-        expected = handle_turn(None, fixed("A1"))
+        expected = handle_fixed(None, "A1")
         assert event_text(answers[0]) == expected.reply
         assert session.state["pending"] == expected.state_delta["pending"]
         assert "route=R2" in line
@@ -297,3 +394,35 @@ async def test_http_retry_through_the_turn_node(script, error, caplog):
         assert not answers[0].actions.state_delta
         assert session.state["pending"] == record
         assert f"route=model_unavailable error={error}" in line
+
+
+# Review 08-1, should-fix 1, through the node: the D10 line before the repeated question.
+async def test_pending_and_unknown_tool_through_the_node():
+    record = a1_record()
+    flight = {
+        "act": "request_action",
+        "operations": [{"tool": "book_flight", "certainty": "explicit", "args": {}}],
+    }
+    fake = ScriptedLlm(script=[json.dumps(flight)])
+    runner, sessions = make_runner(fake)
+    await sessions.create_session(
+        app_name="assistant", user_id=USER, session_id="s-flight", state={"pending": record}
+    )
+
+    events = await run_turn(runner, USER, "s-flight", "Mejor reserva un vuelo")
+
+    [answer] = reply_events(events)
+    assert event_text(answer) == f"{replies.UNKNOWN_TOOL_LINE}\n{record['last_question']}"
+    assert not answer.actions.state_delta
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-flight")
+    assert session.state["pending"] == record
+
+
+# Review note 5: parts are joined with a space, so two parts never glue two words (D4 rule 3).
+def test_message_text_joins_text_parts():
+    two = types.Content(role="user", parts=[types.Part(text="con"), types.Part(text="Ana")])
+    assert message_text(two) == "con Ana"
+    with_empty = types.Content(role="user", parts=[types.Part(text="Ana"), types.Part()])
+    assert message_text(with_empty) == "Ana"
+    assert message_text(types.Content(role="user")) == ""
+    assert message_text({"text": "Ana"}) == ""

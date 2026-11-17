@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from core.presence import clean
-from core.registry import FieldKind, FieldSpec, ToolSpec
+from core.registry import FieldKind, FieldSpec, ToolSpec, list_buckets
 from core.text import normalize
 
 # D4 rule 3, written as the rule lists them and normalized like the names ("él" -> "el").
@@ -42,9 +42,6 @@ EXCLUDED_WORDS: frozenset[str] = frozenset(
         "nosotras", "ellos", "ellas", "le", "les", "lo", "la", "los", "las", "se", "nos",
     )
 )  # fmt: skip
-
-_ADD = "_add"
-_REMOVE = "_remove"
 
 
 @dataclass(frozen=True)
@@ -149,7 +146,7 @@ def _merge_list(
     """Rule 6 for a `person_list` field: replace, then add, then remove. Returns the kept list."""
     replace, add, remove = (
         _anchored_names(key, incoming.get(key), message, result)
-        for key in (spec.name, spec.name + _ADD, spec.name + _REMOVE)
+        for key in (spec.name, *list_buckets(spec))
     )
     if replace is None and add is None and remove is None:
         return old

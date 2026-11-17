@@ -440,3 +440,16 @@ def test_remove_from_an_absent_list_only_notes():
     result = merge_args(MEETING, {}, {"attendees_remove": ["Ana"]}, "quita a Ana")
 
     assert result == MergeResult({}, [], [], [Note("attendees", "remove_absent", "Ana")])
+
+
+# Should-fix of review 07-3: "add one that is already there" is measured against the turn's
+# base (`<field>` when it came), not only against what was stored (D37).
+def test_add_present_is_measured_against_the_turn_base():
+    incoming = {"attendees": ["Ana"], "attendees_add": ["ana"]}
+
+    result = merge_args(MEETING, {}, incoming, "con Ana")
+
+    assert result.args == {"attendees": ["Ana"]}
+    assert result.changes == [Change("attendees", "fill", None, ["Ana"])]
+    assert result.notes == [Note("attendees", "add_present", "ana")]
+    assert result.rejected == []

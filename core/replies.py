@@ -5,7 +5,10 @@ Tool-specific words (action phrases, field labels) come from the registry, never
 build; they never start or run anything.
 """
 
-from core.registry import TOOLS, ToolSpec
+from typing import Any
+
+from core.merge import Change, Note
+from core.registry import TOOLS, FieldKind, FieldSpec, ToolSpec
 
 # D10: something in the request matched no tool, and something else did.
 UNKNOWN_TOOL_LINE = "Parte de tu solicitud no corresponde a ninguna de mis herramientas."
@@ -30,6 +33,9 @@ NOT_UNDERSTOOD = "No te entendí; no cambié nada. ¿Puedes decirlo de otra form
 MODEL_UNAVAILABLE = (
     "El modelo no está disponible ahora; no cambié nada. Intenta de nuevo en un momento."
 )
+
+# D4 rule 9: a name not written in the message was dropped. Fixed, so it never shows the name.
+REJECTED_NAME_LINE = "No tomé en cuenta un nombre que no aparece escrito en tu mensaje."
 
 # Provisional: a request that arrives with every field (task 09b replaces it).
 READY_NOT_AVAILABLE_YET = (
@@ -58,3 +64,66 @@ def missing_question(tool: ToolSpec, missing: list[str]) -> str:
     """
     labels = [spec.label for spec in tool.fields if spec.name in missing]
     return f"Para {tool.action_phrase} necesito {join_es(labels)}."
+
+
+def show_value(spec: FieldSpec, value: Any) -> str:
+    """A collected value as the user said it, written by field kind, never by tool (D4 rule 9).
+
+    Nothing is converted or completed: a date or a time shows the components that arrived
+    (day 40 stays 40, a lone hour gets no minutes); resolving them is the validator's job (D5).
+    """
+    if spec.kind == FieldKind.PERSON_LIST:
+        return join_es([str(name) for name in value])
+    if spec.kind == FieldKind.DATE:
+        return _show_date(value)
+    if spec.kind == FieldKind.TIME:
+        return _show_time(value)
+    return str(value)
+
+
+def _show_date(parts: dict[str, Any]) -> str:
+    shown = []
+    if "weekday" in parts:
+        shown.append(str(parts["weekday"]))
+    if "relative_days" in parts:
+        days = parts["relative_days"]
+        shown.append(_RELATIVE_DAYS.get(days, f"{days} días desde hoy"))
+    for key, word in (("day", "día"), ("month", "mes"), ("year", "año")):
+        if key in parts:
+            shown.append(f"{word} {parts[key]}")
+    return ", ".join(shown)
+
+
+_RELATIVE_DAYS = {0: "hoy", 1: "mañana", 2: "pasado mañana"}
+
+
+def _show_time(parts: dict[str, Any]) -> str:
+    if "hour" in parts and "minute" in parts:
+        return f"{parts['hour']}:{parts['minute']:02d}"
+    if "hour" in parts:
+        return f"las {parts['hour']}"
+    return f"minuto {parts['minute']}"
+
+
+def change_line(spec: FieldSpec, change: Change) -> str:
+    """D4 rules 8 and 9: a fill with its value, an overwrite old -> new, a clear with the old
+    list. Never stored in `last_question` (D2, D14)."""
+    if change.kind == "fill":
+        return f"Anoté {spec.label}: {show_value(spec, change.new)}."
+    old = show_value(spec, change.old)
+    if change.kind == "overwrite":
+        return f"Cambié {spec.label}: {old} → {show_value(spec, change.new)}."
+    return f"Vacié {spec.label} (antes: {old})."
+
+
+def note_line(spec: FieldSpec, note: Note) -> str:
+    """D4 rule 6: a list operation that changed nothing, or the same name added and removed.
+
+    Written in the present, so `add_present` is also true in a new flow whose list already
+    brought the name in this turn (autodecided in task 08).
+    """
+    if note.kind == "add_present":
+        return f"{note.name} ya está en {spec.label}."
+    if note.kind == "remove_absent":
+        return f"{note.name} no está en {spec.label}, así que no quité a nadie."
+    return f"Pediste agregar y quitar a {note.name}; queda fuera de {spec.label}."

@@ -46,6 +46,15 @@ FIXED: dict[str, FixedTurn] = {
             "operations": [_op("create_ticket", priority="Alta", assignee="Carlos")],
         },
     ),
+    # Case B, third message (own wording): the title, which the agent asks for because it is
+    # never derived from the description (D2, D17; amendment F4).
+    "B3": FixedTurn(
+        "El título es Falla de autenticación",
+        {
+            "act": "provide_info",
+            "operations": [_op("create_ticket", title="Falla de autenticación")],
+        },
+    ),
     # Case C, TASK.md line 342: one explicit reading and one plausible one.
     "C1": FixedTurn(
         "Avísale a Carlos que mañana revisamos el servidor",
