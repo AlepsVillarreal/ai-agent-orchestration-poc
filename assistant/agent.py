@@ -1,0 +1,118 @@
+"""ADK adapter for the turn: the dynamic node that hosts one turn, the root workflow and the app.
+
+The turn node is the only place where ADK meets the pure core (D1.1, *Frontera*). Each turn it:
+1. reads the pending record from the session state (read only);
+2. calls the interpreter as a child node with `ctx.run_node` (D1: the LLM only interprets);
+3. hands the interpretation and the pending record to `core.turn.handle_turn`;
+4. returns exactly one `Event` with the template reply and the state change.
+
+The state is written only through that final event (`Event(state=...)` becomes
+`actions.state_delta`, which the `Runner` applies when it stores the event). Nothing writes to
+`ctx.state` in the body, because a write made before an exception would be persisted anyway
+(D1.1, *Estado*). A failed interpreter call answers with a template and no state change.
+
+Importing this module opens no connection, needs no API key and does not load `.env`: only
+the CLI does that, so tests never see the real key.
+"""
+
+import logging
+from typing import Any
+
+from google.adk import Context, Event, Workflow
+from google.adk.agents import LlmAgent
+from google.adk.apps import App
+from google.adk.workflow import node
+from pydantic import ValidationError
+
+from assistant.interpreter import interpreter
+from core import replies
+from core.interpretation import TurnInterpretation
+from core.turn import handle_turn
+
+logger = logging.getLogger("assistant.turn")
+
+APP_NAME = "assistant"  # same as the folder: `adk web` names each agent after its folder
+
+NOT_UNDERSTOOD = "not_understood"
+MODEL_UNAVAILABLE = "model_unavailable"
+_FAILURE_REPLIES = {
+    NOT_UNDERSTOOD: replies.NOT_UNDERSTOOD,
+    MODEL_UNAVAILABLE: replies.MODEL_UNAVAILABLE,
+}
+
+
+def classify_failure(error: BaseException | None) -> str:
+    """D1.1 *Fallos*, in order: a schema error or no output -> not understood; else unavailable.
+
+    ADK wraps a child's exception in its own error, which keeps the original in `.error`; it is
+    read with `getattr` so no private ADK module is imported. `None` means empty output.
+    """
+    if error is None or isinstance(getattr(error, "error", error), ValidationError):
+        return NOT_UNDERSTOOD
+    return MODEL_UNAVAILABLE
+
+
+def log_turn(
+    session_id: str,
+    route: str,
+    interpretation: TurnInterpretation | None = None,
+    error: str | None = None,
+) -> None:
+    """One `key=value` line per turn. `route` comes from the core, never from the reply text.
+
+    `ops` lists the operations as the interpreter returned them, before the registry filter, so
+    an unknown tool dropped by D10 stays visible. No argument value and no message text here.
+    `ambiguity` is the model's own free text (D2: logged, read by nothing).
+    """
+    act = interpretation.act.value if interpretation else ""
+    ops = ",".join(
+        f"{operation.tool}:{operation.certainty.value}"
+        for operation in (interpretation.operations if interpretation else [])
+    )
+    parts = [f"session={session_id}", f"act={act}", f"ops={ops}", f"route={route}"]
+    if error:
+        parts.append(f"error={error}")
+    if interpretation and interpretation.ambiguity_reason:
+        parts.append(f"ambiguity={interpretation.ambiguity_reason!r}")
+    logger.info(" ".join(parts))
+
+
+def build_root_agent(interpreter: LlmAgent) -> Workflow:
+    """The root workflow: one edge from START to the turn node (D1.1). Tests pass an
+    interpreter built on a fake model."""
+
+    # rerun_on_resume=True as D1.1 fixes it, and no retry setting: a retry would run the body (and
+    # the model) again and spend free-tier quota.
+    @node(rerun_on_resume=True)
+    async def turn(ctx: Context, node_input: Any) -> Event:
+        # Only `ctx` and `node_input`: any other parameter would be bound to a state key.
+        pending = ctx.state.get("pending")
+        try:
+            output = await ctx.run_node(interpreter, node_input=node_input)
+            error = None
+        except Exception as ex:  # D1.1: every model failure ends in a template
+            output, error = None, ex
+
+        if error is not None or not output:
+            route = classify_failure(error)
+            inner = getattr(error, "error", error)
+            log_turn(
+                ctx.session.id,
+                route,
+                error=type(inner).__name__ if inner is not None else "empty_output",
+            )
+            return Event(message=_FAILURE_REPLIES[route])  # no `state`: nothing changes
+
+        # ADK already validated `output` against the schema, so this does not fail.
+        interpretation = TurnInterpretation.model_validate(output)
+        # Outside the `try`: an error in the core is a bug and must surface as one.
+        outcome = handle_turn(pending, interpretation)
+        log_turn(ctx.session.id, outcome.route, interpretation)
+        return Event(message=outcome.reply, state=outcome.state_delta)
+
+    return Workflow(name="root_agent", edges=[("START", turn)])
+
+
+root_agent = build_root_agent(interpreter)
+# resumability_config stays None (D1.1): the CLI always sends a new message.
+app = App(name=APP_NAME, root_agent=root_agent)

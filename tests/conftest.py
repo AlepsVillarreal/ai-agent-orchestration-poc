@@ -1,4 +1,9 @@
+import os
+
 import pytest
+import redis
+
+DEFAULT_REDIS_URL = "redis://localhost:6379/0"
 
 
 @pytest.fixture(autouse=True)
@@ -32,3 +37,27 @@ def canonical_args() -> dict[str, dict]:
             "channel": "email",
         },
     }
+
+
+@pytest.fixture
+def redis_url() -> str:
+    """The URL of a live Redis, or a clear failure (not a timeout) when it is down.
+
+    Not autouse: only the tests that need Redis ask for it. Each test creates its own async
+    client on its own event loop, uses a unique session id and deletes its session at the end.
+    """
+    url = os.environ.get("REDIS_URL") or DEFAULT_REDIS_URL
+    client = redis.Redis.from_url(url, socket_connect_timeout=1, socket_timeout=1)
+    try:
+        client.ping()
+        alive = True
+    except redis.RedisError:
+        alive = False
+    finally:
+        client.close()
+    if not alive:  # failed outside the `except`, so no chained connection traceback is shown
+        pytest.fail(
+            f"Redis no responde en {url}: levántalo con `docker compose up -d redis`",
+            pytrace=False,
+        )
+    return url

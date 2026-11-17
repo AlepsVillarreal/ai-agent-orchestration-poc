@@ -22,6 +22,15 @@ PENDING_NOT_SUPPORTED_YET = "Todavía no puedo continuar esa operación en esta 
 # Provisional: rules R3, R4 and R5 (tasks 13 and 14a replace it).
 ONE_OPERATION_AT_A_TIME = "Por ahora puedo atender una operación a la vez; ¿cuál necesitas primero?"
 
+# D1.1 *Fallos* and D2: the interpreter's output was broken, outside the schema or empty.
+# Nothing in the state changed (the turn node returns no state delta).
+NOT_UNDERSTOOD = "No te entendí; no cambié nada. ¿Puedes decirlo de otra forma?"
+
+# D1.1 *Fallos*: any other failure of the model call (429, timeout, no key, network).
+MODEL_UNAVAILABLE = (
+    "El modelo no está disponible ahora; no cambié nada. Intenta de nuevo en un momento."
+)
+
 # Provisional: a request that arrives with every field (task 09b replaces it).
 READY_NOT_AVAILABLE_YET = (
     "Tengo los datos; la validación y la confirmación aún no están disponibles."
