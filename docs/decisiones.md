@@ -819,3 +819,64 @@ el orquestador; revisable
 - **Descartada:** `int` de Pydantic, que convierte `"30"` en 30.
 - **Pendiente:** ningún test lo cubre: con `int` los 46 tests siguen pasando (revisión de la
   tarea 01). Falta un caso `"30"` en el test de formas inválidas de los contratos.
+  [resuelto en la tarea 02]
+
+**D14 · Intérprete: el resumen de lo pendiente llega por un `InstructionProvider`**
+(2026-11-16) · autodecidida por el orquestador; revisable
+
+- **Decisión:** la instrucción del `interpreter` (`assistant/interpreter.py`) es una función
+  que recibe el `ReadonlyContext`, lee `state["pending"]` y une la parte fija, generada del
+  registro, con el resumen de `pending_summary` (`core/instruction.py`). El resumen lee solo
+  `tools`, `status`, `missing` y `last_question`, nunca un valor recopilado, y no se agrega
+  ninguna clave al estado. Lo prueban `test_pending_summary_has_no_collected_values` y
+  `test_interpreter_request_with_fake_model`.
+- **Motivo:** con una instrucción de texto, ADK sustituye `{pending?}` por
+  `str(state["pending"])`, el registro entero con sus valores, en contra de D2; y una
+  `{palabra}` en una descripción que no sea clave del estado lanza `KeyError`
+  (`flows/llm_flows/prompt/_instructions_utils.py:150-197`, google-adk 2.14.1). Una función
+  se salta esa sustitución (`agents/llm_agent.py:820-842`). El modelo ve un resumen del
+  estado estructurado, separado del historial, con el mecanismo que ADK ofrece para eso
+  (TASK.md líneas 229 y 572).
+- **Precisa D2:** `{pending?}` queda como el nombre del resumen, no como sintaxis de ADK. El
+  texto de D2 no se edita.
+- **Descartadas:** una instrucción de texto con `{pending_summary?}` y una clave derivada que
+  el nodo escribe en cada delta (un texto redundante en Redis que debe seguir a `pending`);
+  `{pending?}` literal con el registro en otra clave (cambia el nombre que fija D6).
+- **Pendiente:** la tarea 03 debe escribir `tools` también en una aclaración, con los nombres
+  de las candidatas: D3 (*Aclaración*, *Estado*) solo lista `candidates`, y el resumen no la
+  lee.
+
+**D15 · Intérprete: una clave fuera del esquema se descarta** (2026-11-16) · autodecidida por
+el orquestador; revisable
+
+- **Decisión:** `TurnInterpretation` y sus modelos internos (`core/interpretation.py`)
+  conservan el valor por defecto de Pydantic, sin `extra="forbid"`: una clave que el esquema
+  no declara se descarta y el turno sigue. Lo prueba `test_unknown_keys_are_dropped`.
+- **Motivo:** es lo mismo que hace el filtro por contrato de D2 con un argumento ajeno. El
+  `response_schema` no lleva `additionalProperties`, que el SDK rechaza en modo Developer API
+  cuando es verdadero (`google/genai/_transformers.py:650-654`, google-genai 2.34.0) y cuyo
+  `false` no se puede comprobar sin llamar al modelo. Con `response_schema` la salida ya
+  viene restringida, así que el caso es casi inalcanzable; y descartar una clave nunca
+  ejecuta nada, porque los argumentos siguen pasando por fusión, validación y confirmación
+  (TASK.md líneas 166-168 y 233-243).
+- **Precisa D12:** D12 vale para los contratos, la última barrera antes del mock, donde una
+  clave de más es un error del código; aquí la clave viene del modelo. El texto de D12 no se
+  edita.
+- **Descartada:** `extra="forbid"`, como en D12 (una clave ajena sería un `ValidationError`
+  que responde "no te entendí", y se enviaría `additionalProperties: false` a AI Studio sin
+  verificarlo).
+
+**D16 · Intérprete: valores de reserva en el resumen de lo pendiente** (2026-11-16) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** si al registro pendiente le falta una de las cuatro claves que lee el
+  resumen, `pending_summary` escribe `none` (`tools`, `missing`, `last_question`) o `unknown`
+  (`status`) en vez de fallar. Sin registro escribe "Nothing is pending.".
+- **Motivo:** la tarea 03 crea siempre las cuatro claves, así que solo afecta a un registro
+  mal formado; un fallo al armar la instrucción tumbaría el turno por un problema que no es
+  del usuario (TASK.md línea 580).
+- **Descartada:** leer las claves con `pending["status"]`, que lanza `KeyError` con un
+  registro incompleto.
+- **Pendiente:** ningún test lo cubre: los tests del resumen usan un registro completo o
+  ninguno (`test_pending_summary_has_no_collected_values`,
+  `test_pending_summary_when_nothing_is_pending`).
