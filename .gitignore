@@ -31,6 +31,8 @@ htmlcov/
 
 # Local working notes (not part of the deliverable)
 CLAUDE.md
+CLAUDE.md.bak-*
+Claude outputs/
 docs/TASK.md
 docs/prompts/
 docs/research/
