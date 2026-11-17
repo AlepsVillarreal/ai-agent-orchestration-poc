@@ -72,13 +72,19 @@ Manda al intérprete, solo, los 23 mensajes de la fase 0 con el estado pendiente
 # Lista los 23 escenarios; no llama al modelo, no lee .env y no crea archivos
 uv run python -m phase0.run
 
-# 23 llamadas al modelo real, una por escenario, sin reintentos
+# 23 llamadas al modelo real, una por escenario; el cliente reintenta un 429 o un 503
 uv run python -m phase0.run --run
+
+# Reanuda una corrida detenida: copia lo que ese JSONL ya guardó y llama solo a lo que falta
+uv run python -m phase0.run --run --resume phase0/runs/<fecha>-<modelo>.jsonl
 ```
 
-- `--run` necesita `GOOGLE_API_KEY` en `.env` (no necesita Redis) y consume 23 llamadas de la cuota gratuita, con 6 s de espera entre ellas.
+- `--run` necesita `GOOGLE_API_KEY` en `.env` (no necesita Redis) y consume hasta 23 llamadas de la cuota gratuita, con 13 s de espera entre llamadas reales (la página de límites no publica los de la capa gratuita para el modelo; 13 s cabe en 5 por minuto).
+- Solo el arnés reintenta (D28 y D30): ante un 429 o un 503, el cliente de google-genai repite la llamada hasta 3 intentos, con espera exponencial de 2 a 30 s; también reintenta sus errores de red transitorios. Cada reintento deja una línea en stderr (logger `google_genai._api_client`). El agente de la CLI no reintenta (D1.1).
 - La salida cruda queda en `phase0/runs/<fecha>-<modelo>.jsonl`, una línea por escenario. El informe en stdout da los fallos de forma y el veredicto de F0.1.
-- Si el modelo falla (cuota, timeout, falta la clave), la corrida se detiene en ese escenario, sale con código 1 y no da veredicto.
+- Si el modelo sigue fallando tras los reintentos (o hay un timeout o falta la clave), la corrida se detiene en ese escenario, sale con código 1 y no da veredicto.
+- `--resume` (solo junto con `--run`) escribe un JSONL nuevo de 23 líneas: copia sin cambios las líneas que ya tenían salida y sin error, y llama solo a los escenarios que faltan; el archivo anterior no se modifica (D29). Si ese archivo no es de este arnés o no coincide con los escenarios actuales, sale con código 2 sin llamar al modelo ni crear archivos.
+- La prueba de humo de la tarea 06 está en `phase0/runs/`, con una nota por corrida: 0/23 fallos de forma, así que se mantiene la opción B (D32).
 - Los umbrales de D2 se miden solo con esta prueba de humo: la corrida completa de 207 llamadas no se hace (F0.2).
 
 ## Tests

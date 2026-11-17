@@ -723,7 +723,7 @@ ejecuta una tool o qué se guarda se sigue consultando al autor.
 
 **D11 · Dos operaciones de la misma tool en un turno** (2026-11-16)
 
-- **Decisión:** si tras el filtro del registro un turno trae dos operaciones de la misma tool
+- **Decisión:** [enmendado en D11.1] si tras el filtro del registro un turno trae dos operaciones de la misma tool
   ("avísale a Carlos por correo y a Ana por SMS"), el código no inicia ni fusiona nada, no
   toca el estado y responde con una plantilla: "Puedo hacer una operación de cada tipo por
   mensaje; ¿por cuál empiezo?". Vale igual si difieren en `certainty`.
@@ -1126,3 +1126,211 @@ autodecidida por el orquestador; revisable
   núcleo cree esos estados, así que pueden diferir del registro que verá el modelo en
   producción.
 - **Descartada:** los 13 registros escritos a mano, como decía D2.
+
+**D28 · Arnés de la fase 0: reintentos ante 429 y 503, y reanudación** (2026-11-17) · decidida
+por el autor
+
+- **Decisión:** solo el arnés (`phase0/run.py`) da al modelo `HttpRetryOptions` de
+  google-genai, con `Gemini(model=MODEL, retry_options=RETRY_OPTIONS)` (`harness_model`): hasta
+  3 intentos por llamada, con espera exponencial y jitter de 2 a 30 s, ante un 429 o un 503
+  (D30). Gana además `--resume RUTA`, solo junto con `--run`: copia lo que un JSONL anterior ya
+  guardó y llama solo a los escenarios que faltan (D29). La espera entre llamadas reales es de
+  13 s. El nodo del turno y el intérprete de `assistant/` siguen sin reintentos (D1.1). Lo
+  prueban `test_retries_only_in_the_harness` y `test_resume_calls_only_what_was_not_saved`.
+- **Motivo:** la primera corrida de humo se detuvo en `N1`, 12 de 23, por un
+  `503 UNAVAILABLE` ("high demand"), no por cuota. Repetirla entera gastaría cuota de la capa
+  gratuita en 11 salidas ya guardadas. El arnés es una herramienta de medición, no el turno: no
+  enmienda D1.1, cuyo motivo (un `RetryConfig` vuelve a ejecutar el cuerpo del nodo) sigue en
+  pie (TASK.md líneas 471 y 580).
+- **Espera:** la página de límites (`ai.google.dev/gemini-api/docs/rate-limits`, que redirige
+  a `aistudio.google.com/docs/rate-limits`, leída el 2026-11-17) no publica RPM, RPD ni TPM de
+  la capa gratuita para `gemini-3.5-flash-lite`. Por eso 13 s, que cabe en 5 RPM, y no un
+  límite más alto adivinado (D2, *Umbral*).
+- **Precisa D1.1:** `retry_config` (el reintento de un nodo de ADK, que D1.1 prohíbe) y
+  `HttpRetryOptions` (el del cliente HTTP de google-genai) son mecanismos distintos; ninguno
+  llega a `assistant/`. El texto de D1.1 no se edita.
+- **Hechos de google-adk 2.14.1 y google-genai 2.34.0** (para las tareas 19 y 20):
+  - `Gemini.retry_options` vale `None` por defecto (`google/adk/models/google_llm.py:188`), y
+    con `None` google-genai hace un solo intento (`tenacity.stop_after_attempt(1)`,
+    `google/genai/_api_client.py:678`). El nodo del turno hace una sola llamada por turno.
+  - Sin reintentos, el 503 de la primera corrida salió de `runner.run_async` como la
+    `google.genai.errors.ServerError` original: ADK la desenvuelve de `DynamicNodeFailError` al
+    terminar el nodo raíz (`google/adk/workflow/_node_runner_utils.py:276`). En el nodo del
+    turno es el caso 2 de D1.1: "modelo no disponible", sin tocar el estado.
+  - `APIError` trae el código HTTP en `.code` y no define `status_code`
+    (`google/genai/errors.py:91`). El `getattr(ex, "status_code", None) == 429` que D1.1
+    permite nunca coincidiría; no tiene efecto, porque D23 descartó una redacción propia para
+    el 429.
+  - Un 429 real no se observó en ninguna de las dos corridas: esa parte del *Sin verificar* de
+    D1.1 sigue abierta. En la segunda corrida hubo otro 503, que absorbió el reintento del
+    arnés.
+
+**D29 · Arnés de la fase 0: `--resume` escribe un archivo nuevo** (2026-11-17) · autodecidida
+por el orquestador; revisable
+
+- **Decisión:** `--resume RUTA` lee el JSONL anterior y da por guardado cada escenario cuya
+  línea trae `raw` y no trae `error` (`load_saved`). Escribe un JSONL nuevo, con el nombre de
+  siempre (`<fecha>-<modelo>.jsonl`) y una línea por escenario en el orden de `SCENARIOS`: la
+  de un guardado se copia byte a byte y la de uno que falta sale de su llamada. La espera corre
+  solo entre llamadas reales, y el archivo anterior no se toca.
+  - *Archivo anterior inválido:* una línea que no es JSON o no es un registro del arnés, un id
+    repetido o desconocido, o un `fixture` o `message` que no coincide con el escenario actual
+    → código 2 antes de leer `.env`, sin llamadas y sin archivo nuevo.
+  - *Informe:* suma "Reanudados de `<archivo>`: m; llamadas en esta corrida: k". El veredicto
+    de F0.1 sale sobre los 23 del archivo nuevo, con las mismas condiciones. Un error del
+    modelo, tras los reintentos, sigue deteniendo la corrida sin veredicto.
+
+  Lo prueban `test_resume_calls_only_what_was_not_saved`,
+  `test_model_error_while_resuming_stops_without_verdict`,
+  `test_invalid_previous_file_calls_nothing`, `test_wait_runs_only_between_real_calls` y
+  `test_resume_needs_run`.
+- **Motivo:** anexar al archivo de la primera corrida dejaría `N1` dos veces y cambiaría la
+  evidencia ya escrita. Con un archivo nuevo, cada corrida queda como pasó y F0.1 se lee de un
+  solo archivo de 23 líneas. Copiar la línea, y no volver a serializarla, garantiza que la
+  salida guardada es la que dio el modelo.
+- **Descartada:** anexar las líneas nuevas al JSONL anterior.
+
+**D30 · Arnés de la fase 0: los reintentos cubren solo 429 y 503** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** `RETRY_OPTIONS` (`phase0/run.py`) fija `http_status_codes=[429, 503]`, con
+  `attempts=3`, `initial_delay=2.0` y `max_delay=30.0`; `exp_base` y `jitter` quedan en los
+  valores por defecto del SDK (2 y 1).
+- **Motivo:** 429 y 503 son los dos códigos con que la API pide volver a intentar. Un 500
+  puede ser un error del pedido, y repetirlo gasta cuota de la capa gratuita sin cambiar el
+  resultado.
+- **Desviación aceptada:** con `retry_options`, el SDK reintenta siempre sus errores de red
+  transitorios (timeouts y fallos de conexión de httpx y aiohttp,
+  `google/genai/_api_client.py:685`), además de los códigos de `http_status_codes`. El
+  implementador lo informó, el evaluador lo aceptó y el comentario de `RETRY_OPTIONS` lo dice.
+  El tope de 3 intentos por llamada no cambia.
+- **Descartada:** la lista por defecto del SDK (408, 429, 500, 502, 503 y 504,
+  `google/genai/_api_client.py:652-659`).
+
+**D31 · Arnés de la fase 0: una línea en stderr por cada reintento** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** solo bajo `--run`, `_log_http_retries` sube el logger `google_genai._api_client`
+  a INFO, con un handler a stderr que se agrega una sola vez. google-genai escribe ahí una línea
+  antes de cada reintento (`tenacity.before_sleep_log`, `google/genai/_api_client.py:699`). Sin
+  `--run` nada cambia. Lo prueba `test_retry_log_goes_to_stderr_once`.
+- **Motivo:** el SDK no registra cada petición, así que las peticiones HTTP se cuentan como
+  llamadas más líneas de reintento y se comparan con el techo que aprobó el autor (12
+  llamadas, 36 peticiones). Es la observabilidad del arnés (TASK.md línea 471).
+- **Descartada:** no registrar los reintentos (el techo aprobado no se podría comprobar).
+
+**D32 · Resultado de la prueba de humo: 0/23 fallos de forma, se mantiene la opción B**
+(2026-11-17)
+
+- **Decisión:** por F0.1, con 0/23 fallos de forma se mantiene la opción B (D1): ni el
+  híbrido ni un ajuste del esquema. Se midió con `gemini-3.5-flash-lite` (Google AI Studio,
+  capa gratuita) en dos corridas, cada una con su nota del mismo nombre en `phase0/runs/`:
+  - `20261117T072304Z-gemini-3.5-flash-lite.jsonl` se detuvo en `N1`, 12 de 23, por un
+    `503 UNAVAILABLE`, con 0 fallos de forma en las 11 salidas;
+  - `20261117T073844Z-gemini-3.5-flash-lite.jsonl`, con `--resume` sobre la primera (D29),
+    copió esas 11 y llamó a las 12 que faltaban: 23 de 23, sin errores y 0 fallos de forma.
+    Hubo 13 peticiones HTTP (12 llamadas y un reintento por un 503), con un techo aprobado de
+    36. Su nota es la de F0.1.
+
+  Un recuento sin modelo (`shape_failure` sobre cada `raw`) coincide con lo guardado, línea
+  por línea.
+- **Motivo:** F0.1 deja decidir solo a los fallos de forma, y no hubo ninguno. Los desaciertos
+  de comprensión son informativos y no se vuelven a medir (F0.2): D3 conserva la marca
+  "provisional" y el disparador de P2′ no se mide.
+- **Lecturas que llevan a otras decisiones** (una corrida por escenario; no juzgan los ≥ 7/9
+  de D2):
+  - *Caso C:* `C1` volvió como una sola `send_notification` `explicit`, sin `schedule_meeting`
+    y sin `ambiguity_reason`, igual que su contraste `N1`. Cae en R2 y el agente pediría el
+    canal: la *Limitación (omisión)* de D3, ahora medida (TASK.md líneas 338-355). La sonda
+    `S3` volvió igual y resolvería la aclaración a la notificación, que D2 (*Sondas*) llama
+    fallo crítico; nada se ejecuta (D7.1). Lo toma D33.
+  - *`L4`:* "Quita a Juan y agrega a Ana" trajo las cubetas correctas, pero en dos operaciones
+    de `schedule_meeting`. D11 respondería con su pregunta y no aplicaría nada (TASK.md líneas
+    143-145). Lo toma D11.1.
+  - *Segundos mensajes:* `K1`, `K2`, `L2` y `L4` llegaron con `act=request_action` donde se
+    esperaba `provide_info`. D3 (*Misma tool* y regla 2 de la *Lectura de la respuesta*)
+    acepta los dos, y `K1`–`K3`, `S1`, `S2` y `L1`–`L3` dan lo que el código debe hacer.
+  - *Favorables* (preguntas 1 y 8 de §9, TASK.md líneas 552 y 560): `A1` no trae `title`;
+    `X1` copia "urgente"; `D1` trae 40, 25 y 90 como se dijeron, y el mes convertido a 11;
+    `E1` trae `depends_on`, así que la inferencia de D8.4 no hizo falta; `G2` trae
+    `confirms_tool`; ningún número que el mensaje no contuviera.
+- **Pendiente:** si D33 cambia descripciones del esquema, el 0/23 y estas lecturas quedan
+  medidos con las anteriores; la tarea 19 dice con qué versión se midió cada cosa (D34).
+
+**D33 · Caso C con el modelo real: el camino de D2, en la tarea 10c** (2026-11-17) · decidida
+por el autor
+
+- **Decisión:** una tarea nueva antes de la 13, la 10c (≤ 1 h), ajusta solo descripciones de
+  campo del esquema del intérprete (`certainty` y `plausible` y, si hace falta,
+  `ambiguity_reason`, en `core/interpretation.py`), sin prompt extenso ni reglas por palabra
+  clave. Después vuelve a medir con el modelo real: 5 llamadas propuestas (`C1`, `N1`, `S3`,
+  `A1` y `E1`; D34) y mínimo `C1`, `N1` y `S3`, con el número aprobado por el autor al llegar
+  a la 10c. Pasa si, por las filas de D3, `C1` cae en R4 o R5 y la pregunta lista la
+  notificación y la reunión; `N1` cae en R2 solo con `send_notification`; `S3` no resuelve a
+  ninguna candidata; y `A1` y `E1` dan lo mismo que su interpretación fija.
+  - Si falla `C1`, `N1`, `A1` o `E1`, se revierten las descripciones y el caso C queda como
+    limitación documentada (tareas 17 y 20).
+  - Si solo falla `S3`, las descripciones se quedan, la tarea 13 lo anota y la 20 lista la
+    limitación.
+- **Motivo:** con el modelo real el caso C se lee como una notificación (D32), y el agente
+  pediría el canal en vez de aclarar (TASK.md líneas 338-355). D2 prevé mejorar descripciones
+  ante un fallo de comprensión; el híbrido no aplica, porque D2 lo reserva a fallos de forma.
+  Una descripción de campo no es un prompt que decida (líneas 109 y 587).
+- **Precisa D2:** la respuesta del autor no incluye el paso de D2 de probar
+  `gemini-3.8-flash`: si las descripciones no lo cierran, el caso C pasa a limitación. El
+  texto de D2 no se edita.
+
+**D11.1 · Enmienda a D11: se fusionan las operaciones de una tool pendiente que no se solapan**
+(2026-11-17) · decidida por el autor
+
+- **Decisión:** solo en la rama *Misma tool* de la compuerta de D3 (paso 3: todas las
+  operaciones del turno son de tools pendientes y `act` es `request_action` o `provide_info`),
+  las operaciones de una misma tool cuyos `args` no comparten ninguna clave se fusionan en una
+  antes de D11. Cada cubeta `_add` y `_remove` cuenta como clave propia. Si alguna clave se
+  repite, o si traen `depends_on` distintos (D35), sigue la pregunta de D11. Sin nada
+  pendiente, o con otra tool en el turno, D11 no cambia: dos tickets pedidos no se vuelven
+  uno. La implementa la tarea 08; hasta entonces `core/turn.py` (`_decide`) aplica D11 tal
+  como está escrita.
+- **Motivo:** en la fase 0, `L4` ("Quita a Juan y agrega a Ana", con la reunión con Juan
+  pendiente) trajo las cubetas correctas partidas en dos operaciones de `schedule_meeting`
+  (D32), y D11 no aplicaba nada. TASK.md líneas 143-145 piden actualizar lo recopilado con la
+  información nueva. La rama *Misma tool* ya trata el turno como `provide_info` de la tool
+  pendiente (D2, D3), así que la fusión completa una solicitud y no mezcla dos (líneas
+  128-134 y 413).
+- **Alcance:** la respuesta del autor (2026-11-17) limita la fusión a una tool ya pendiente.
+  La revisión de la tarea 06 (ronda 3, hallazgo 1) la ciñe a la rama *Misma tool*: con dos
+  operaciones de la tool pendiente y una `explicit` de otra tool, D3.1 archivaría lo pendiente
+  y la fusión uniría dos tickets pedidos en un flujo nuevo.
+- **Precisa D11:** la opción "juntarlas en una sola operación" de sus *Descartadas* sigue
+  descartada fuera de esta rama. El texto de D11 no se edita.
+- **Pendiente** (para la brief 08): si las claves se cuentan después del filtro del registro
+  (el `L4` medido trae `"message": null` en las dos operaciones); cómo llega `depends_on` a la
+  fusión, porque `_filter_by_registry` (`core/turn.py`) hoy lo descarta; y si una candidata de
+  una aclaración cuenta como tool pendiente.
+
+**D34 · Tarea 10c: cinco llamadas propuestas y el umbral de F0.1** (2026-11-17) · autodecidida
+por el orquestador; revisable
+
+- **Decisión:** la 10c propone al autor 5 llamadas (`C1`, `N1`, `S3`, `A1` y `E1`), con
+  mínimo `C1`, `N1` y `S3`; el autor aprueba el número al llegar a la 10c. F0.1 vale también
+  para ellas: un fallo de forma detiene el trabajo y se pregunta al autor. Si el autor aprueba
+  solo 3, la tarea 19 dice que el 0/23 y las lecturas favorables de D32 se midieron con las
+  descripciones anteriores.
+- **Motivo:** las descripciones son compartidas por los 23 escenarios (D3, *Disparador*).
+  `A1` vigila los ejemplos claros de RF-01 (TASK.md líneas 113-117) y `E1` el caso E (línea
+  378); sin ellos, una regresión se vería recién en la grabación con el modelo real de la
+  tarea 17.
+- **Descartada:** medir solo las 3 llamadas de la respuesta del autor sin decir con qué
+  descripciones se midió lo demás.
+
+**D35 · Fusión de D11.1: sin exigir la misma `certainty`; no con `depends_on` distintos**
+(2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** la fusión de D11.1 no exige que las operaciones traigan la misma `certainty`.
+  Si traen `depends_on` distintos, no se fusionan y sigue la pregunta de D11.
+- **Motivo:** con la tool pendiente, D2 y la rama *Misma tool* de D3 ya ignoran la
+  `certainty`; exigirla mandaría a D11 un `L4` con una `explicit` y una `plausible`. Dos
+  `depends_on` distintos son dos órdenes posibles de un plan, y fusionarlos obligaría al
+  código a elegir uno (TASK.md línea 252).
+- **Descartadas:** exigir la misma `certainty`; quedarse con el `depends_on` de la primera
+  operación.
