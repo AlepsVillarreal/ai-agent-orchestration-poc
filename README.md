@@ -64,6 +64,23 @@ printf 'Necesito crear un ticket\n' | uv run python -m assistant.cli
 
 > **Estado actual:** el agente reconoce la solicitud y pide los datos que faltan (caso A). Todavía no valida, no confirma ni ejecuta herramientas: una solicitud con todos los datos, la continuación de una operación pendiente o una solicitud con varias operaciones o ambigua responden con mensajes provisionales.
 
+## Prueba de humo del intérprete (fase 0)
+
+Manda al intérprete, solo, los 23 mensajes de la fase 0 con el estado pendiente que vería y cuenta las salidas que no cumplen el esquema (`docs/decisiones.md`, D2, F0 y F0.1). No pasa por el núcleo ni ejecuta herramientas. Se corre desde la raíz del repositorio.
+
+```bash
+# Lista los 23 escenarios; no llama al modelo, no lee .env y no crea archivos
+uv run python -m phase0.run
+
+# 23 llamadas al modelo real, una por escenario, sin reintentos
+uv run python -m phase0.run --run
+```
+
+- `--run` necesita `GOOGLE_API_KEY` en `.env` (no necesita Redis) y consume 23 llamadas de la cuota gratuita, con 6 s de espera entre ellas.
+- La salida cruda queda en `phase0/runs/<fecha>-<modelo>.jsonl`, una línea por escenario. El informe en stdout da los fallos de forma y el veredicto de F0.1.
+- Si el modelo falla (cuota, timeout, falta la clave), la corrida se detiene en ese escenario, sale con código 1 y no da veredicto.
+- Los umbrales de D2 se miden solo con esta prueba de humo: la corrida completa de 207 llamadas no se hace (F0.2).
+
 ## Tests
 
 ```bash

@@ -1,8 +1,8 @@
 # Decisiones de diseño
 
 Registro de las decisiones de arquitectura del PoC, en el orden en que se tomaron. Las
-referencias a `TASK.md` y sus números de línea apuntan al enunciado de la prueba técnica, que
-no forma parte del repositorio.
+referencias a `TASK.md` y sus números de línea apuntan al enunciado de la prueba técnica,
+copiado literal en [`TASK.md`](TASK.md).
 
 Una entrada marcada **autodecidida por el orquestador; revisable** es una elección de
 implementación que el orquestador del equipo de agentes tomó sin detener el trabajo, por regla
@@ -256,7 +256,7 @@ ejecuta una tool o qué se guarda se sigue consultando al autor.
      antes de mirar `act`. Sin este orden, "solo avísale" devuelto como `request_action`
      entraría a la tabla como una solicitud nueva y perdería los argumentos guardados.
   3. Si hay una operación o un plan pendiente, antes de enrutar por `act`:
-     - *Otra tool:* S contiene una tool que no está pendiente y `act` es `request_action`,
+     - *Otra tool:* [enmendado en D3.1] S contiene una tool que no está pendiente y `act` es `request_action`,
        `provide_info`, `reject` o `cancel` → cambio de intención. El registro pendiente se
        archiva como abandonado y la tabla corre sobre este turno. Las tools de S que ya estaban
        pendientes conservan sus argumentos guardados; las demás se descartan sin mezclar nada
@@ -305,7 +305,7 @@ ejecuta una tool o qué se guarda se sigue consultando al autor.
     ("notificación"). La plantilla nunca lee `ambiguity_reason` (D2).
   - *Estado:* la aclaración es un estado (`awaiting_clarification`) del único registro
     pendiente de D1, no un registro aparte. Guarda `id`, `candidates` (lista de
-    `{tool, args, depends_on}` tal como se interpretaron), `asked_turn` y `attempts` (0 o 1).
+    `{tool, args, depends_on}` tal como se interpretaron), `asked_turn` y `attempts` (0 o 1) [enmendado en D3.2].
     Los argumentos se guardan porque el turno de respuesta no ve el mensaje original
     (`include_contents='none'`) y TASK.md línea 145 exige conservar lo recopilado. La
     `certainty` original no se guarda. El resumen `{pending?}` muestra al modelo solo los
@@ -324,7 +324,7 @@ ejecuta una tool o qué se guarda se sigue consultando al autor.
        ninguna. Los argumentos guardados se fusionan con los nuevos según D4.
     3. `act` es `confirm`, S está vacío, hay exactamente una candidata y `confirms_tool` es
        nulo o la nombra → se resuelve a esa candidata.
-    4. S contiene una tool que no es candidata y `act` es `request_action`, `provide_info`,
+    4. [enmendado en D3.1] S contiene una tool que no es candidata y `act` es `request_action`, `provide_info`,
        `reject` o `cancel` → es una solicitud nueva: la aclaración se archiva como abandonada y
        la tabla de reglas corre sobre este turno. Las tools de S que eran candidatas conservan
        sus argumentos guardados; las demás candidatas se descartan (caso F, TASK.md líneas
@@ -339,14 +339,14 @@ ejecuta una tool o qué se guarda se sigue consultando al autor.
     argumentos guardados estén completos y válidos, su respuesta es la pregunta por los
     faltantes o la solicitud de confirmación. D7 no puede eximir de confirmación a un flujo en
     el turno en que nace de una aclaración.
-  - *Respuesta no clara:* la primera vez `attempts` pasa a 1 y se vuelve a preguntar en forma
+  - *Respuesta no clara:* [enmendado en D3.2] la primera vez `attempts` pasa a 1 y se vuelve a preguntar en forma
     cerrada: "Necesito que elijas: '{nombre A}', '{nombre B}' o 'ambas'. Si no quieres hacer
     nada, di 'cancelar'." (con una candidata: "Necesito un sí o un no: ¿quieres {acción}?"; con
     tres: "Necesito que elijas una o varias: '{nombre A}', '{nombre B}' o '{nombre C}'. Si no
     quieres hacer nada, di 'cancelar'."). La segunda vez se descarta la aclaración, no se
     inicia nada y se dice: "No inicié ninguna acción. Dime qué necesitas cuando quieras." Un
     "sí" posterior ya no tiene a qué asociarse (TASK.md línea 284).
-  - *Fallo del intérprete en el turno de respuesta:* D1.1 no toca el estado, así que `attempts`
+  - *Fallo del intérprete en el turno de respuesta:* [enmendado en D3.2] D1.1 no toca el estado, así que `attempts`
     no avanza y la aclaración sigue pendiente. Una racha de errores del modelo no la agota; un
     test lo comprueba.
 - **Frontera con D2:** la regla de D2 "el código ignora su `certainty`" cubre solo los
@@ -638,12 +638,12 @@ ejecuta una tool o qué se guarda se sigue consultando al autor.
 **D8 · Plan de varias tools** (2026-11-16)
 
 - **Decisión:**
-  - *D8.1 · Forma:* lineal, una tool por paso, hasta las tres del catálogo. Cada paso va
+  - *D8.1 · Forma:* [enmendado en D8.4] lineal, una tool por paso, hasta las tres del catálogo. Cada paso va
     después del que nombra en `depends_on`; un `depends_on` que apunta fuera del plan o forma
     un ciclo se ignora y se anota en el log. El plan se detiene en el primer fallo, aunque
     los pasos no dependan entre sí. Una sola confirmación para todo el plan (D7.1). Amplía el
     plan de dos pasos del alcance mínimo de D1.
-  - *D8.2 · `ticket_id`:* el registro declara que un paso de `send_notification` que depende
+  - *D8.2 · `ticket_id`:* [enmendado en D8.4] el registro declara que un paso de `send_notification` que depende
     de `create_ticket` recibe el `ticket_id` al final de `message` ("… (ticket TCK-0001)").
     `message` sigue siendo obligatorio y se pide si falta. La confirmación del plan dice "se
     añadirá el número de ticket".
@@ -738,7 +738,7 @@ ejecuta una tool o qué se guarda se sigue consultando al autor.
 
 - **Decisión:** la prueba de humo de 23 llamadas es obligatoria y se corre justo después del
   primer turno completo. La corrida de 207 llamadas de D2 se hace solo si la cuota del día
-  alcanza al terminar los tests de los casos A–H. Si no se hace:
+  alcanza al terminar los tests de los casos A–H. Si no se hace [enmendado en F0.2: no se hace]:
   - el README dice que los umbrales de D2 se midieron solo con el humo;
   - D3 conserva la marca "provisional" de la *Aclaración* y P1 se mantiene;
   - el *Disparador para pasar a P2′* de D3 no se mide, porque necesita 81 corridas de los
@@ -1015,3 +1015,114 @@ revisable
   la salida por tubería se lee como una transcripción.
 - **Descartadas:** una sesión fija ("default"); dejar que Redis o la clave fallen en el
   primer turno (la conexión de `RedisSessionService` es perezosa).
+
+**D3.1 · Enmienda a D3: un cambio de intención descarta todo lo pendiente** (2026-11-17) ·
+decidida por el autor
+
+- **Decisión:** en un cambio de intención (D3, *Compuerta de entrada*, paso 3, *Otra tool*, y
+  *Lectura de la respuesta*, regla 4), la operación, el plan o la aclaración pendiente se
+  archiva como abandonado (D6) y la tabla de reglas corre sobre todas las operaciones del
+  turno. Ninguna tool conserva argumentos guardados, aunque ya estuviera pendiente o fuera
+  candidata. Con `reject` o `cancel`, las operaciones de las tools pendientes también pasan a
+  la tabla.
+- **Motivo:** el caso F pide detectar el cambio, no mezclar argumentos e iniciar el flujo
+  nuevo (TASK.md líneas 395-417); no pide conservar los de una tool que se repite. Ahorra una
+  rama del núcleo y su test. Recorte del hallazgo 6 de la revisión del backlog (2026-11-17):
+  esas dos reglas de D3 no tenían tarea.
+- **Limitación para el README:** "mejor crea un ticket y avísale a Carlos" con una
+  notificación pendiente empieza la notificación de cero y vuelve a pedir lo que el mensaje no
+  repite. Con `reject` o `cancel`, una operación de la tool rechazada que el modelo devuelva en
+  ese turno inicia un flujo; nada se ejecuta sin la confirmación de D7.1.
+
+**D3.2 · Enmienda a D3: aclaración mínima** (2026-11-17) · decidida por el autor
+
+- **Decisión:** una respuesta no clara a una aclaración (D3, *Lectura de la respuesta*, regla
+  5) repite la misma pregunta y no cambia nada más. La regla 1 no cambia: `cancel` y `reject`
+  descartan la aclaración. Se quitan el contador `attempts`, la repregunta cerrada, el
+  descarte al segundo intento, sus plantillas y el test de que un fallo del intérprete no
+  consume `attempts`.
+- **Motivo:** el caso C pide preguntar y no ejecutar (TASK.md líneas 338-355); no pide un
+  número de intentos ni una segunda pregunta distinta. Recorte de la nota 10 de la revisión
+  del backlog (2026-11-17, tarea 13 adelgazada).
+- **Consecuencia:** una aclaración sin respuesta clara sigue pendiente hasta que se resuelve,
+  se cancela o llega un cambio de intención (D3.1). Un fallo del intérprete en ese turno sigue
+  sin tocar el estado (D1.1).
+
+**D8.4 · Enmienda a D8.1 y D8.2: dependencia inferida** (2026-11-17) · decidida por el autor
+
+- **Decisión:** si el modelo pone `depends_on`, manda (D8.1). Si falta y el plan trae
+  `create_ticket` y `send_notification`, el código infiere la dependencia: el ticket va
+  primero y su `ticket_id` se añade al final de `message`, como en D8.2. La confirmación del
+  plan lo muestra ("se añadirá el número de ticket") y el log anota que la dependencia se
+  infirió. Dónde vive la condición lo fija D25.
+- **Motivo:** el caso E pide ejecutar en el orden correcto y transferir el `ticket_id`
+  (TASK.md líneas 388-390); no puede depender de que el modelo devuelva `depends_on`.
+  Hallazgo 7 de la revisión del backlog (2026-11-17), opción A. El arnés de la fase 0
+  (`phase0/run.py`) informa aparte si `E1` trae `depends_on`.
+- **Limitación para el README:** una notificación no relacionada en el mismo plan recibe el
+  número de ticket; se ve en la confirmación, antes del "sí" (D7.1).
+- **Descartada:** no inferir y documentarlo como limitación (el ejemplo grabado del caso E
+  incumpliría la línea 390).
+
+**F0.2 · Enmienda a F0: la corrida de 207 no se hace** (2026-11-17) · decidida por el autor
+
+- **Decisión:** se quita la tarea 16 (`phase0-full-run`) y se aplica la rama "si no se hace"
+  de F0 tal como está escrita: el README dice que los umbrales de D2 se midieron solo con la
+  prueba de humo de 23 llamadas; D3 conserva la marca "provisional" de la *Aclaración*; el
+  *Disparador para pasar a P2′* no se mide; y P1 se mantiene. El umbral que decide es el de
+  F0.1.
+- **Motivo:** recorte de la nota 10 de la revisión del backlog (2026-11-17), que protege el
+  plazo y la cuota de la capa gratuita. El foco de la evaluación es la orquestación, no el
+  modelo (TASK.md líneas 587 y 597).
+
+**D25 · Dependencia inferida: la condición sale de la declaración del registro** (2026-11-17)
+· autodecidida por el orquestador; revisable
+
+- **Decisión:** la inferencia de D8.4 se escribe contra la declaración que D8.2 pone en el
+  registro (la tool que produce el ID y la que lo recibe), no con los nombres
+  `create_ticket` y `send_notification` en el código: si falta `depends_on` y el plan contiene
+  las dos tools de esa declaración, la receptora depende de la productora. La implementa la
+  tarea 14a.
+- **Motivo:** con las tres tools del catálogo se comporta igual que el texto del autor en
+  D8.4; no cambia lo que ve el usuario, cuándo se ejecuta una tool ni qué se guarda. Evita un
+  caso especial por nombre en el núcleo (TASK.md líneas 562 y 582).
+- **Descartada:** nombrar las dos tools en el código, como dice D8.4 (cada par nuevo de tools
+  que se pasen un ID sería otra rama).
+
+**D26 · Arnés de la fase 0: se quita una cerca de código antes de validar** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** antes de `TurnInterpretation.model_validate_json`, el arnés
+  (`strip_code_fence`, `phase0/run.py`) quita una cerca ```` ```json … ``` ```` que envuelva
+  toda la salida, con las mismas comprobaciones que ADK y sin importar su módulo privado. El
+  campo `raw` del JSONL guarda la salida intacta. Lo prueban
+  `test_shape_failures_are_counted_and_the_run_goes_on` (una salida válida dentro de una
+  cerca no es fallo de forma) y `test_empty_nested_object_needs_content_in_the_expected_output`.
+- **Motivo:** ADK quita esa cerca antes de validar (`_strip_json_code_fence`,
+  `utils/_schema_utils.py:214-252`, google-adk 2.14.1), así que el nodo del turno acepta esa
+  salida. Contarla como fallo de forma detendría el trabajo por F0.1 y abriría la discusión
+  del híbrido de D1 sin que el agente falle.
+- **Descartada:** no quitarla y que la tarea 06 revise el `raw` de cada fallo `validation`
+  antes de aplicar F0.1 (un paso a mano que puede olvidarse).
+
+**D27 · Arnés de la fase 0: de dónde salen los registros pendientes** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** de los 13 escenarios de segundo mensaje (`phase0/scenarios.py`), los que ven
+  un registro `collecting` lo toman del núcleo: `B2` el que crea `handle_turn(None, B1)`, y
+  `F2` y `L1`–`L4` el de `handle_turn(None, F1)` (la reunión con Juan). Los demás ven un
+  literal escrito a mano con `tools`, `status`, `missing=[]` y `last_question`, sin ningún
+  valor recopilado, porque el núcleo aún no crea esos estados: `G2`, `awaiting_confirmation`
+  con "¿Confirmas que envíe la notificación?"; y `K1`–`K3` y `S1`–`S3`,
+  `awaiting_clarification` con `send_notification` y `schedule_meeting` y la pregunta de D3
+  (*Pregunta*) armada con las `action_phrase` del registro. Lo prueba
+  `test_the_23_scenarios_of_d2`, que además comprueba que ningún resumen lleva un valor dicho
+  antes en su conversación.
+- **Motivo:** donde el núcleo ya crea el registro, el modelo ve el mismo resumen de D14 que
+  verá en producción, y un literal no puede separarse del núcleo sin que nada lo note.
+- **Precisa D2:** D2 decía "`{pending?}` escrito a mano" para todos los segundos mensajes. El
+  texto de D2 no se edita.
+- **Costo aceptado:** los literales de confirmación y aclaración no se actualizan cuando el
+  núcleo cree esos estados, así que pueden diferir del registro que verá el modelo en
+  producción.
+- **Descartada:** los 13 registros escritos a mano, como decía D2.
