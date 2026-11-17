@@ -13,7 +13,7 @@ from core.interpretation import TurnInterpretation
 from core.registry import TOOLS, FieldKind
 from core.turn import TurnInput, handle_turn
 from core.validation import RULES, Invalid, Validation, validate
-from tests.interpretations import FIXED, NOW
+from tests.interpretations import FIXED, NOW, SESSION
 
 TICKET = TOOLS["create_ticket"]
 MEETING = TOOLS["schedule_meeting"]
@@ -163,7 +163,7 @@ def _collected_args(*keys: str) -> tuple[str, dict]:
     pending = None
     for key in keys:
         interpretation = TurnInterpretation.model_validate(FIXED[key].interpretation)
-        outcome = handle_turn(pending, interpretation, TurnInput(FIXED[key].message, NOW))
+        outcome = handle_turn(pending, interpretation, TurnInput(FIXED[key].message, NOW, SESSION))
         pending = outcome.state_delta.get("pending", pending)
     (step,) = pending["steps"]
     return step["tool"], step["args"]

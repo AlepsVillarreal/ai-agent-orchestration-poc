@@ -5,10 +5,17 @@ These are plain Python functions, not ADK `FunctionTool`s: the LLM never sees or
 
 Each mock first passes its arguments through the tool's contract, so even if every earlier
 check were skipped, invalid arguments raise `ValidationError` and nothing is executed.
+
+`simulated` gives a variant of a mock that fails or times out (D8.3, D9.2, D9.3): the tests
+pick it by parameter, and the CLI can switch a tool to its failure (`assistant/cli.py`). The
+three mocks never change their default behavior; this module reads no environment variable.
 """
 
 import uuid
-from typing import Any
+from collections.abc import Callable
+from typing import Any, Literal
+
+from pydantic import BaseModel
 
 from core.contracts import CreateTicketArgs, ScheduleMeetingArgs, SendNotificationArgs
 
@@ -53,3 +60,25 @@ def send_notification(args: dict[str, Any]) -> dict[str, Any]:
         "message": f"Notificación {notification_id} enviada a {notification.recipient} "
         f"por {notification.channel}.",
     }
+
+
+FAILURE_MESSAGE = "Falla simulada: la operación no se completó."
+
+
+def simulated(
+    contract: type[BaseModel], id_field: str, mode: Literal["failure", "timeout"]
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """A mock that checks its contract and then fails: `failure` answers
+    `{"success": False, <id_field>: None, "message": ...}`; `timeout` raises `TimeoutError`.
+
+    It takes the contract and the ID field from the tool's `ToolSpec` (this module cannot import
+    the registry, which imports it).
+    """
+
+    def execute(args: dict[str, Any]) -> dict[str, Any]:
+        contract.model_validate(args)
+        if mode == "timeout":
+            raise TimeoutError("simulated timeout")
+        return {"success": False, id_field: None, "message": FAILURE_MESSAGE}
+
+    return execute

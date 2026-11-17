@@ -64,3 +64,23 @@ def test_registry_maps_each_tool_to_its_mock(canonical_args):
         assert tool.execute is expected_mocks[name]
         result = tool.execute(canonical_args[name])
         assert result[tool.result_id_field]
+
+
+# Brief 11 (decision F): failure and timeout by parameter; the default mocks do not change.
+@pytest.mark.parametrize("tool_name", list(TOOLS))
+def test_simulated_failure_and_timeout(tool_name, canonical_args):
+    tool = TOOLS[tool_name]
+    failing = mock_tools.simulated(tool.contract, tool.result_id_field, "failure")
+    timing_out = mock_tools.simulated(tool.contract, tool.result_id_field, "timeout")
+
+    assert failing(canonical_args[tool_name]) == {
+        "success": False,
+        tool.result_id_field: None,
+        "message": mock_tools.FAILURE_MESSAGE,
+    }
+    with pytest.raises(TimeoutError):
+        timing_out(canonical_args[tool_name])
+    for variant in (failing, timing_out):  # the contract is checked first, as in the mocks
+        with pytest.raises(ValidationError):
+            variant({})
+    assert tool.execute(canonical_args[tool_name])["success"] is True

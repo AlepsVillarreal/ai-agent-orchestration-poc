@@ -22,7 +22,7 @@ from typing import Any
 from core.interpretation import TurnInterpretation
 from core.registry import TOOLS
 from core.turn import TurnInput, handle_turn
-from tests.interpretations import FIXED, NOW
+from tests.interpretations import FIXED, NOW, SESSION
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,9 @@ def _core_record(first_message: str) -> dict[str, Any]:
     """
     fixed = FIXED[first_message]
     interpretation = TurnInterpretation.model_validate(fixed.interpretation)
-    return handle_turn(None, interpretation, TurnInput(fixed.message, NOW)).state_delta["pending"]
+    return handle_turn(None, interpretation, TurnInput(fixed.message, NOW, SESSION)).state_delta[
+        "pending"
+    ]
 
 
 def _literal_record(tools: list[str], status: str, question: str) -> dict[str, Any]:

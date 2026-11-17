@@ -3,9 +3,14 @@
 The turn node is the only place where ADK meets the pure core (D1.1, *Frontera*). Each turn it:
 1. reads the pending record from the session state (read only);
 2. calls the interpreter as a child node with `ctx.run_node` (D1: the LLM only interprets);
-3. hands the interpretation, the pending record, the message text and the moment of the turn
-   (`TurnInput`) and the closed operations (`history`, D6) to `core.turn.handle_turn`;
+3. hands the interpretation, the pending record, the message text, the moment of the turn and
+   the session id (`TurnInput`), the closed operations (`history`, D6) and the execution
+   registry (`executions`, D9) to `core.turn.handle_turn`;
 4. returns exactly one `Event` with the template reply and the state change.
+
+The node runs no tool and holds no rule of D9: it only passes the registry it was built with
+(D46). The registry is the one thing written before the final event, on purpose: a crash
+between a tool call and that event must not lose the fact that the tool was called (D9.1).
 
 The state is written only through that final event (`Event(state=...)` becomes
 `actions.state_delta`, which the `Runner` applies when it stores the event). Nothing writes to
@@ -13,7 +18,8 @@ The state is written only through that final event (`Event(state=...)` becomes
 (D1.1, *Estado*). A failed interpreter call answers with a template and no state change.
 
 Importing this module opens no connection, needs no API key and does not load `.env`: only
-the CLI does that, so tests never see the real key.
+the CLI does that (with a Redis registry), so tests never see the real key. The module's
+`root_agent`, used by `adk web`, keeps its executions in memory.
 """
 
 import json
@@ -31,6 +37,7 @@ from pydantic import ValidationError
 
 from assistant.interpreter import interpreter
 from core import replies
+from core.executions import Executions, InMemoryExecutions, StepRun
 from core.interpretation import TurnInterpretation
 from core.merge import Change, Rejected
 from core.turn import TurnInput, handle_turn
@@ -85,14 +92,17 @@ def log_turn(
     rejected: Sequence[Rejected] = (),
     invalid: Sequence[dict] = (),
     operation_id: str | None = None,
-    results: Sequence[tuple[str, str]] = (),
+    results: Sequence[StepRun] = (),
 ) -> None:
     """One `key=value` line per turn. `route` comes from the core, never from the reply text.
 
     `op` is the `operation_id` of the turn's record (the one the turn created or changed, else
     the one that was pending), when there is one; a uuid, never a user value.
-    A turn that ran a tool adds `results=` (`tool:ID` per step) after `route=`: the ID comes
-    from the tool, not from the user.
+    A turn that tried a tool after a "yes" adds, after `route=`, `results=` (`tool:ID:outcome`
+    per step tried; `ID` is `-` when there is none, `outcome` is ran, reused, failed or
+    uncertain) and `idem=` (the idempotency key of each step, in the same order: a hash, never a
+    user value; D9.1), then `tool_error=` with the exception's type name when a tool raised.
+    The ID comes from the tool, not from the user.
     `ops` lists the operations as the interpreter returned them, before the registry filter, so
     an unknown tool dropped by D10 stays visible. The keys before `changes=` carry no argument
     value and no message text. A turn the interpreter understood adds `invalid=`
@@ -111,7 +121,11 @@ def log_turn(
         parts.append(f"op={operation_id}")
     parts += [f"act={act}", f"ops={ops}", f"route={route}"]
     if results:
-        parts.append("results=" + ",".join(f"{tool}:{result_id}" for tool, result_id in results))
+        parts.append(
+            "results=" + ",".join(f"{r.tool}:{r.result_id or '-'}:{r.outcome}" for r in results)
+        )
+        parts.append("idem=" + ",".join(run.key for run in results))
+        parts += [f"tool_error={run.error}" for run in results if run.error]
     if error:
         parts.append(f"error={error}")
     if interpretation:
@@ -130,9 +144,12 @@ def _operation_id(record: dict | None) -> str | None:
     return record.get("operation_id") if record else None
 
 
-def build_root_agent(interpreter: LlmAgent) -> Workflow:
+def build_root_agent(interpreter: LlmAgent, executions: Executions | None = None) -> Workflow:
     """The root workflow: one edge from START to the turn node (D1.1). Tests pass an
-    interpreter built on a fake model."""
+    interpreter built on a fake model. Without `executions`, each agent built gets its own
+    in-memory registry (D46; D62); the CLI passes the Redis one."""
+    if executions is None:
+        executions = InMemoryExecutions()
 
     # rerun_on_resume=True as D1.1 fixes it, and no retry_config: a retry would run the body (and
     # the model) again and spend free-tier quota. The HTTP retry of a 503 lives in the
@@ -163,9 +180,13 @@ def build_root_agent(interpreter: LlmAgent) -> Workflow:
         # Outside the `try`: an error in the core is a bug and must surface as one.
         # The only place in the code that reads the clock: the local time of the machine, naive
         # (D5.1). The core validates dates and times against it and never reads it itself.
-        turn_input = TurnInput(message=message_text(node_input), now=datetime.now())
+        turn_input = TurnInput(
+            message=message_text(node_input), now=datetime.now(), session_id=ctx.session.id
+        )
         history = ctx.state.get("history") or []  # read only: the core returns the new list
-        outcome = handle_turn(pending, interpretation, turn_input, history=history)
+        outcome = handle_turn(
+            pending, interpretation, turn_input, history=history, executions=executions
+        )
         log_turn(
             ctx.session.id,
             outcome.route,

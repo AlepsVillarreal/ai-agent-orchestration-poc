@@ -22,7 +22,7 @@ from tests.case_c_judge import (
     main,
     round_outcome,
 )
-from tests.interpretations import FIXED, NOW
+from tests.interpretations import FIXED, NOW, SESSION
 
 RUNS = Path(__file__).parent.parent / "phase0" / "runs"
 RUN_06 = RUNS / "20261117T073844Z-gemini-3.5-flash-lite.jsonl"
@@ -231,7 +231,9 @@ def test_n1_and_a1_need_their_own_tool(monkeypatch, key, other):
     # the expected `missing` is made to match the other tool's and only the tool check is left.
     interpretation = {"act": "request_action", "operations": [_op(other)]}
     pending_missing = handle_turn(
-        None, TurnInterpretation.model_validate(interpretation), TurnInput(FIXED[key].message, NOW)
+        None,
+        TurnInterpretation.model_validate(interpretation),
+        TurnInput(FIXED[key].message, NOW, SESSION),
     ).state_delta["pending"]["missing"]
     monkeypatch.setattr(case_c_judge, "_expected_missing", lambda _key: pending_missing)
 

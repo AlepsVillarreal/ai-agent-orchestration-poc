@@ -6,6 +6,7 @@ These tests use `InMemorySessionService`; the Redis round trip is in test_sessio
 import dataclasses
 import json
 import logging
+from datetime import datetime
 
 import httpx
 import pytest
@@ -19,8 +20,11 @@ import assistant.agent
 from assistant.agent import build_root_agent, message_text
 from assistant.interpreter import INTERPRETER_RETRY_OPTIONS, MODEL, build_interpreter
 from core import replies
+from core.confirmation import shown_values
+from core.executions import InMemoryExecutions, execution_key
 from core.instruction import NOTHING_PENDING
 from core.interpretation import TurnInterpretation
+from core.mock_tools import simulated
 from core.registry import TOOLS
 from core.turn import TurnInput, handle_turn
 from tests.fake_llm import (
@@ -32,7 +36,7 @@ from tests.fake_llm import (
     run_turn,
     system_text,
 )
-from tests.interpretations import FIXED, NOW
+from tests.interpretations import FIXED, NOW, SESSION
 
 USER = "u1"
 
@@ -71,7 +75,7 @@ def fixed(key: str) -> TurnInterpretation:
 
 
 def handle_fixed(pending: dict | None, key: str):
-    return handle_turn(pending, fixed(key), TurnInput(FIXED[key].message, NOW))
+    return handle_turn(pending, fixed(key), TurnInput(FIXED[key].message, NOW, SESSION))
 
 
 def a1_record() -> dict:
@@ -83,9 +87,10 @@ def without_id(record: dict) -> dict:
     return {key: value for key, value in record.items() if key != "operation_id"}
 
 
-def make_runner(fake, sessions=None) -> tuple[Runner, InMemorySessionService]:
+def make_runner(fake, sessions=None, executions=None) -> tuple[Runner, InMemorySessionService]:
     sessions = sessions or InMemorySessionService()
-    app = App(name="assistant", root_agent=build_root_agent(build_interpreter(fake)))
+    root_agent = build_root_agent(build_interpreter(fake), executions=executions)
+    app = App(name="assistant", root_agent=root_agent)
     return Runner(app=app, session_service=sessions, auto_create_session=True), sessions
 
 
@@ -563,7 +568,9 @@ async def test_case_g_through_the_node(monkeypatch, caplog):
     [entry] = session.state["history"]
     assert entry["operation_id"] == operation and entry["status"] == "completed"
     [g2_line] = _turn_records(caplog)
-    assert f"route=confirmed results=send_notification:{result_id} " in g2_line
+    # Task 11 (decision G): each step with its outcome, then its idempotency key (a hash).
+    key = execution_key("s-g", "send_notification", calls["send_notification"][0])
+    assert f"route=confirmed results=send_notification:{result_id}:ran idem={key} " in g2_line
     assert f"op={operation}" in g2_line
 
 
@@ -684,3 +691,108 @@ async def test_meeting_through_the_node(monkeypatch):
     assert entry["operation_id"] == record["operation_id"]
     assert entry["steps"][0]["values"]["date"] == "2099-11-20"
     assert fake.calls == 2
+
+
+# Brief 11 -------------------------------------------------------------------------------------
+
+
+# 14 (case H, TASK.md lines 441-449): the node uses the registry it was built with, and the key
+# carries the session.
+async def test_case_h_through_the_node(monkeypatch, caplog):
+    calls = record_tools(monkeypatch)
+    results = record_results(monkeypatch)
+    caplog.set_level(logging.INFO, logger="assistant")
+    executions = InMemoryExecutions()
+    keys = ("H1", "B4", "H1", "B4", "H1", "B4")
+    fake = ScriptedLlm(script=[json.dumps(FIXED[key].interpretation) for key in keys])
+    runner, sessions = make_runner(fake, executions=executions)
+
+    answers, lines = [], []
+    for key in keys[:4]:
+        caplog.clear()
+        events = await run_turn(runner, USER, "s-h", FIXED[key].message)
+        answers.append(event_text(reply_events(events)[0]))
+        lines += _turn_records(caplog)
+
+    assert len(calls["create_ticket"]) == 1
+    [result] = results["create_ticket"]
+    ticket_id = result["ticket_id"]
+    assert answers[1] == f"Listo: creé el ticket {ticket_id}."
+    assert answers[3] == f"Ya creé el ticket {ticket_id} con estos mismos datos; no lo repetí."
+    key = execution_key("s-h", "create_ticket", calls["create_ticket"][0])
+    assert f"results=create_ticket:{ticket_id}:reused idem={key} " in lines[3]
+    assert executions.snapshot() == {key: {"status": "done", "result": result}}
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-h")
+    assert [entry["steps"][0]["outcome"] for entry in session.state["history"]] == [
+        "ran",
+        "reused",
+    ]
+
+    for key in keys[4:]:
+        await run_turn(runner, USER, "s-h2", FIXED[key].message)
+
+    assert len(calls["create_ticket"]) == 2  # another session: another key
+    assert len(executions.snapshot()) == 2
+    assert fake.calls == 6
+
+
+# 15 (note (A2)): the node hands the core the session id and its own clock.
+async def test_node_passes_session_and_clock(monkeypatch):
+    moment = datetime(2031, 5, 6, 7, 8)
+
+    class FrozenClock:
+        @staticmethod
+        def now():
+            return moment
+
+    seen = []
+
+    def spy(*args, **kwargs):
+        seen.append((args, kwargs))
+        return handle_turn(*args, **kwargs)
+
+    monkeypatch.setattr(assistant.agent, "datetime", FrozenClock)
+    monkeypatch.setattr(assistant.agent, "handle_turn", spy)
+    executions = InMemoryExecutions()
+    fake = ScriptedLlm(script=[json.dumps(FIXED["A1"].interpretation)])
+    runner, _ = make_runner(fake, executions=executions)
+
+    await run_turn(runner, USER, "s-spy", FIXED["A1"].message)
+
+    [(args, kwargs)] = seen
+    turn_input = args[2]
+    assert turn_input == TurnInput(FIXED["A1"].message, moment, "s-spy")
+    assert kwargs["executions"] is executions
+
+
+# Review 11-1, should-fix 2 (D9.3 "se anota en el log"; D63): the log line of a step that
+# failed and of one whose tool raised: `-` for the missing ID, its key, and the exception's type.
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("failure", "results=create_ticket:-:failed idem={key} invalid="),
+        (
+            "timeout",
+            "results=create_ticket:-:uncertain idem={key} tool_error=TimeoutError invalid=",
+        ),
+    ],
+)
+async def test_log_line_of_a_failed_and_an_uncertain_step(monkeypatch, caplog, mode, expected):
+    spec = TOOLS["create_ticket"]
+    failing = simulated(spec.contract, spec.result_id_field, mode)
+    monkeypatch.setitem(TOOLS, "create_ticket", dataclasses.replace(spec, execute=failing))
+    caplog.set_level(logging.INFO, logger="assistant")
+    fake = ScriptedLlm(script=[json.dumps(FIXED[key].interpretation) for key in ("H1", "B4")])
+    runner, _ = make_runner(fake)
+    session_id = f"s-log-{mode}"
+
+    await run_turn(runner, USER, session_id, FIXED["H1"].message)
+    record = handle_fixed(None, "H1").state_delta["pending"]
+    [step] = shown_values(record["steps"], NOW)
+    caplog.clear()
+    await run_turn(runner, USER, session_id, FIXED["B4"].message)
+
+    [line] = _turn_records(caplog)
+    key = execution_key(session_id, "create_ticket", step["normalized"])
+    assert f"route=confirmed {expected.format(key=key)}" in line
+    assert "None" not in line.split(" changes=")[0]

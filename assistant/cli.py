@@ -4,12 +4,18 @@ One stdin line is one new user message (never an `invocation_id`: resumability s
 D1.1). Sessions live in Redis, so `--session ID` continues a conversation in a new process.
 stdout carries only the conversation; the turn log and notices go to stderr.
 
-Startup, in order: load `.env`; check Redis; check `GOOGLE_API_KEY`. Each check exits with
-code 1 and a clear message instead of a traceback.
+Startup, in order: load `.env`; check Redis; check `GOOGLE_API_KEY`; read `MOCK_FAIL`. Each
+check exits with code 1 and a clear message instead of a traceback.
+
+The CLI builds its own agent, whose execution registry (D9) lives in the same Redis as the
+sessions, so a "yes" resent from a new process finds the execution already done. `MOCK_FAIL`
+(tool names separated by commas, e.g. `MOCK_FAIL=create_ticket`) makes those tools answer a
+failure in this process, to try D8.3 and D9.3 by hand; it never simulates a timeout.
 """
 
 import argparse
 import asyncio
+import dataclasses
 import logging
 import os
 import sys
@@ -18,13 +24,19 @@ from collections.abc import Iterable, Iterator
 from typing import TextIO
 from urllib.parse import urlsplit
 
+import redis
 import redis.asyncio as redis_asyncio
 from dotenv import load_dotenv
 from google.adk import Runner
+from google.adk.apps import App
 from google.adk.integrations.redis import RedisSessionService
 from google.genai import types
 
-from assistant.agent import app
+from assistant.agent import APP_NAME, build_root_agent
+from assistant.executions import RedisExecutions
+from assistant.interpreter import interpreter
+from core import mock_tools
+from core.registry import TOOLS
 
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"  # the one in .env.example
 USER_ID = "cli"
@@ -93,9 +105,25 @@ def _fail(message: str) -> int:
     return 1
 
 
+def apply_mock_fail(value: str) -> list[str]:
+    """Replace each tool named in `value` by its failing variant in this process's `TOOLS`.
+
+    Returns the names replaced; an unknown name raises `ValueError` before anything changes.
+    """
+    names = [name.strip() for name in value.split(",") if name.strip()]
+    unknown = [name for name in names if name not in TOOLS]
+    if unknown:
+        raise ValueError(", ".join(unknown))
+    for name in names:
+        spec = TOOLS[name]
+        failing = mock_tools.simulated(spec.contract, spec.result_id_field, "failure")
+        TOOLS[name] = dataclasses.replace(spec, execute=failing)
+    return names
+
+
 async def _run(session_id: str | None) -> int:
     redis_url = os.environ.get("REDIS_URL") or DEFAULT_REDIS_URL
-    client = None
+    client = sync_client = None
     try:
         try:
             # Created inside the `try`: a malformed URL raises here, not on the ping.
@@ -113,6 +141,14 @@ async def _run(session_id: str | None) -> int:
         if not os.environ.get("GOOGLE_API_KEY"):
             return _fail("Falta GOOGLE_API_KEY en .env (ver .env.example).")
 
+        try:
+            failing = apply_mock_fail(os.environ.get("MOCK_FAIL", ""))
+        except ValueError as ex:
+            known = ", ".join(TOOLS)
+            return _fail(f"MOCK_FAIL nombra herramientas que no existen: {ex}. Usa: {known}.")
+        if failing:
+            print(f"MOCK_FAIL: {', '.join(failing)} responderán con un fallo.", file=sys.stderr)
+
         if session_id is None:
             session_id = uuid.uuid4().hex
             print(
@@ -121,8 +157,13 @@ async def _run(session_id: str | None) -> int:
                 file=sys.stderr,
             )
 
+        # The registry of D9 on a synchronous client of the same Redis (the core is synchronous).
+        sync_client = redis.Redis.from_url(
+            redis_url, decode_responses=True, socket_connect_timeout=2
+        )
+        root_agent = build_root_agent(interpreter, executions=RedisExecutions(sync_client))
         runner = Runner(
-            app=app,
+            app=App(name=APP_NAME, root_agent=root_agent),
             session_service=RedisSessionService(redis_client=client),
             auto_create_session=True,
         )
@@ -133,6 +174,8 @@ async def _run(session_id: str | None) -> int:
     finally:
         if client is not None:
             await client.aclose()
+        if sync_client is not None:
+            sync_client.close()
 
 
 def main(argv: list[str] | None = None) -> int:

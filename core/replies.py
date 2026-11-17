@@ -7,6 +7,7 @@ build; they never start or run anything.
 
 from typing import Any
 
+from core.history import FAILED, RAN, REUSED
 from core.merge import Change, Note
 from core.registry import TOOLS, FieldKind, FieldSpec, ToolSpec
 from core.validation import Cause
@@ -123,15 +124,38 @@ def confirmation_question(tools: list[ToolSpec]) -> str:
     return f"¿Confirmas que quieres {actions}? Responde sí o no."
 
 
-def result_line(tool: ToolSpec, result: dict[str, Any]) -> str:
-    """The reply for one step that ran (TASK.md lines 9 and 246): what was done and its ID.
+def result_line(tool: ToolSpec, result_id: str) -> str:
+    """The reply for one step that ran (TASK.md lines 24 and 246): what was done and its ID.
 
-    The phrase and the ID field come from the registry (TASK.md line 562); the ID is copied as
-    the tool returned it, never assumed to have a format. The tool's own `message` is not shown:
-    it has the canonical values ("high", "email") and repeats what was just confirmed; it stays
-    in `history` with the rest of the result (D6).
+    The phrase comes from the registry and the ID from the field the registry names (TASK.md
+    line 562), read once by the core and copied as the tool returned it, never assumed to have a
+    format. The tool's own `message` is not shown: it has the canonical values ("high", "email")
+    and repeats what was just confirmed; it stays in `history` with the rest of the result (D6).
     """
-    return f"Listo: {tool.done_phrase} {result[tool.result_id_field]}."
+    return f"Listo: {tool.done_phrase} {result_id}."
+
+
+def step_line(tool: ToolSpec, outcome: str, result_id: str | None) -> str:
+    """One line per step tried after a "yes" (D48, D9.1-D9.3; D61).
+
+    Phrases from the registry, never the tool's `message`, and no grammatical gender that would
+    fail with "reunión" or "notificación". `reused`: the same execution was done already;
+    `failed`: the tool answered an error and asking again runs it again (D9.3); `uncertain`: it
+    cannot be known whether it happened, and it is not retried (D9.2).
+    """
+    if outcome == RAN:
+        return result_line(tool, result_id)
+    if outcome == REUSED:
+        return f"Ya {tool.done_phrase} {result_id} con estos mismos datos; no lo repetí."
+    if outcome == FAILED:
+        return (
+            f"No pude {tool.action_phrase}: la herramienta respondió con un error. "
+            "Si me lo pides de nuevo, lo intento otra vez."
+        )
+    return (
+        f"No pude confirmar si llegué a {tool.action_phrase}; "
+        "no lo voy a reintentar para no duplicarlo."
+    )
 
 
 def _normalized_value(spec: FieldSpec, value: Any) -> str:

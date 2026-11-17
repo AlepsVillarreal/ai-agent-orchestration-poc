@@ -15,6 +15,9 @@ from typing import Any, NamedTuple
 # naive like the turn node's clock. "El viernes" is 2026-11-20 and "mañana" 2026-11-18.
 NOW = datetime(2026, 11, 17, 9, 0)
 
+# The session the core tests run in (task 11): it goes into every idempotency key (D9.1).
+SESSION = "s-test"
+
 
 class FixedTurn(NamedTuple):
     message: str

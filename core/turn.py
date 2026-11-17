@@ -1,11 +1,11 @@
 """The function that decides one turn.
 
 `handle_turn` receives the pending record, the interpreter's output, the turn's own inputs
-(`TurnInput`: the message text and the moment of the turn) and the closed operations
-(`history`, D6, read by no rule), and returns a template reply plus the state change. It calls
-no model. The ADK turn node is its only caller: it puts `reply` in the event's message and
-`state_delta` in the event's state (D1.1). `_run_confirmed` is the only place in the code that
-runs a tool (D46).
+(`TurnInput`: the message text, the moment of the turn and the session), the closed operations
+(`history`, D6, read by no rule) and the execution registry (`executions`, D9), and returns a
+template reply plus the state change. It calls no model. The ADK turn node is its only caller:
+it puts `reply` in the event's message and `state_delta` in the event's state (D1.1).
+`_run_confirmed` is the only place in the code that runs a tool (D46).
 
 Order of a turn (D3, *Compuerta de entrada*):
 1. Registry filter (`filter_by_registry`): drop operations of unknown tools and keep only the
@@ -26,8 +26,9 @@ Order of a turn (D3, *Compuerta de entrada*):
      runs (what D4 requires of D7); (4) still `collecting` -> repeat the question (D7.1);
      (5) the hash of the shown values must match (D7.2), else show them again with the new
      hash, after a line that says the values changed (author's answer on note (ddd));
-     (6) `_run_confirmed` calls the tool once with the normalized values, empties `pending`,
-     answers with one result line per step and appends the record to `history`.
+     (6) `_run_confirmed` runs each step under its idempotency key (D9.1-D9.3), stops at the
+     first step that does not end done, empties `pending`, answers with one line per step
+     tried and appends the record to `history` as completed, failed or uncertain.
    - *Misma tool*: `act` is `request_action` or `provide_info` and every operation is of a
      pending tool (none at all counts too) -> each operation is anchored and merged into the
      step of its tool (D4, D18); `certainty` is ignored (D2). The reply shows every change,
@@ -69,7 +70,15 @@ from uuid import uuid4
 
 from core import replies
 from core.confirmation import confirmation_hash, shown_values
-from core.history import COMPLETED, appended, closed_entry
+from core.executions import (
+    Executions,
+    InMemoryExecutions,
+    StepRun,
+    execution_key,
+    from_stored,
+    settled,
+)
+from core.history import DONE_OUTCOMES, UNCERTAIN, appended, closed_entry, closed_status
 from core.interpretation import Act, Certainty, TurnInterpretation
 from core.merge import Change, MergeResult, Rejected, merge_args
 from core.presence import drop_absent
@@ -87,11 +96,13 @@ class TurnInput:
     `message` is the user's text, read only to anchor names (D4 rule 3). `now` is the moment of
     the turn, local and naive: dates and times are validated against it (D5.1, D5.2). It has no
     default, so every caller, tests included, says which moment it validates against; only the
-    turn node reads the clock. Task 11 adds `session_id`.
+    turn node reads the clock. `session_id` goes into every idempotency key (D9.1); it has no
+    default either, so two sessions never share keys by a forgotten argument.
     """
 
     message: str
     now: datetime
+    session_id: str
 
 
 @dataclass
@@ -102,7 +113,7 @@ class TurnOutcome:
     changes: list[Change] = field(default_factory=list)  # for the log (D4 rule 8)
     rejected: list[Rejected] = field(default_factory=list)  # for the log (D4 rule 3)
     invalid: list[dict] = field(default_factory=list)  # the record's `invalid`, for the log (D5)
-    results: list[tuple[str, str]] = field(default_factory=list)  # (tool, ID) per step that ran
+    results: list[StepRun] = field(default_factory=list)  # per step tried after a "yes" (D9)
 
 
 def handle_turn(
@@ -110,6 +121,7 @@ def handle_turn(
     interpretation: TurnInterpretation,
     turn_input: TurnInput,
     history: Sequence[dict] = (),
+    executions: Executions | None = None,  # None: a new in-memory registry for this call only
 ) -> TurnOutcome:
     operations = filter_by_registry(interpretation)
     dropped_some = len(operations) < len(interpretation.operations)
@@ -122,6 +134,7 @@ def handle_turn(
         confirms_tool=interpretation.confirms_tool,
         dropped_some=dropped_some,
         history=history,
+        executions=executions if executions is not None else InMemoryExecutions(),
     )
 
     # D10: tell the user part of the request was ignored, unless nothing was left and nothing
@@ -141,6 +154,7 @@ def _decide(
     confirms_tool: str | None,
     dropped_some: bool,
     history: Sequence[dict],
+    executions: Executions,
 ) -> TurnOutcome:
     same_tool = _is_same_tool(pending, act, operations)
     if same_tool:
@@ -155,9 +169,8 @@ def _decide(
         # `question`, `other` and the clarification are tasks 12 and 13.
         if pending.get("status") in (COLLECTING, AWAITING_CONFIRMATION):
             if act == Act.CONFIRM:
-                return _confirm(
-                    pending, operations, turn_input, confirms_tool, dropped_some, history
-                )
+                outcome = _confirm(pending, operations, turn_input, confirms_tool, dropped_some)
+                return outcome or _run_confirmed(pending, turn_input, history, executions)
             if same_tool:
                 steps, merges = _merge_steps(pending, operations, turn_input.message)
                 return _after_merge(pending, steps, merges, turn_input.now, route="same_tool")
@@ -291,7 +304,7 @@ def _repeat_pending(
 ) -> TurnOutcome:
     """Repeat what is pending, after the lines of `merges`, with nothing of the message applied.
 
-    The stored steps are assessed again against `now` (decision F; autodecided AS): the record is
+    The stored steps are assessed again against `now` (D57): the record is
     written only if the result differs from the stored one (a time that passed while it
     waited), else the state is unchanged (D40, D42). Nothing runs.
     """
@@ -313,9 +326,8 @@ def _confirm(
     turn_input: TurnInput,
     confirms_tool: str | None,
     dropped_some: bool,
-    history: Sequence[dict],
-) -> TurnOutcome:
-    """A "yes" with something pending (D7). It runs the tool only at the end of this order.
+) -> TurnOutcome | None:
+    """A "yes" with something pending (D7). None, only at the end of this order, means "run".
 
     1. Another tool, or something the filter dropped: the "yes" no longer answers only what was
        shown. Nothing runs and nothing of the message is applied; the pending question or
@@ -335,7 +347,7 @@ def _confirm(
        the current values and the new hash (author's answer on note (ddd)); a step that
        stopped being complete or valid -> back to `collecting` with its invalid lines and
        question (D7.1; review 10a-1, should-fix 1).
-    6. `_run_confirmed`.
+    6. None: the caller runs `_run_confirmed`.
     """
     now = turn_input.now
     if dropped_some or any(operation["tool"] not in pending["tools"] for operation in operations):
@@ -357,33 +369,43 @@ def _confirm(
         outcome = _pending_outcome(record, [], now, route="confirm_hash_changed")
         outcome.reply = f"{replies.DATA_CHANGED_LINE}\n{outcome.reply}"
         return outcome
-    return _run_confirmed(pending, shown_values(pending["steps"], now), history)
+    return None
 
 
-def _run_confirmed(record: dict, shown: list[dict], history: Sequence[dict]) -> TurnOutcome:
-    """The only place in the code that runs a tool (D46).
-
-    Each step's tool receives the normalized values the user confirmed, the same ones the hash
-    covers (" Carlos " -> "Carlos", "correo" -> "email"); the mock checks them against its
-    contract (D12). `pending` is emptied, so a repeated "yes" finds nothing pending (TASK.md
-    line 284), and the record goes to `history` as completed, with the values each tool received
-    and its result (D6). The reply is one result line per step, with the ID the tool returned
-    (TASK.md line 246). `success` is not read yet: "Listo" and `completed` assume it; a failed
-    or raising tool, stopping a plan and the execution record are task 11 (D8.3, D9).
+def _run_confirmed(
+    record: dict, turn_input: TurnInput, history: Sequence[dict], executions: Executions
+) -> TurnOutcome:
+    """The only place in the code that runs a tool (D46), each step under its idempotency key:
+    session + tool + the normalized values confirmed (D9.1). A key already `done` gives its result
+    without running; one `started` is uncertain, never run again (D9.2). After the call,
+    `core/executions.py` stores `done`, releases the key after a failure (D9.3) or leaves it
+    `started`. The first step not done stops the rest (D8.1, TASK.md line 270). `pending` is
+    emptied (a repeated "yes" finds nothing, TASK.md line 284); the record goes to `history` (D6).
     """
-    done, lines, results = [], [], []
-    for step in shown:
-        tool = TOOLS[step["tool"]]
-        result = tool.execute(step["normalized"])
-        done.append({"tool": tool.name, "values": step["normalized"], "result": result})
-        lines.append(replies.result_line(tool, result))
-        results.append((tool.name, str(result[tool.result_id_field])))
-    entry = closed_entry(record, COMPLETED, done)
+    runs = []
+    for step in shown_values(record["steps"], turn_input.now):
+        tool, values = TOOLS[step["tool"]], step["normalized"]
+        key = execution_key(turn_input.session_id, tool.name, values)
+        stored = executions.reserve(key)
+        if stored is not None:
+            run = from_stored(tool.name, tool.result_id_field, key, values, stored)
+        else:
+            try:
+                result = tool.execute(values)
+            except Exception as ex:  # it may have happened: uncertain, never retried (D9.2)
+                run = StepRun(tool.name, values, key, UNCERTAIN, error=type(ex).__name__)
+            else:
+                run = settled(executions, tool.name, tool.result_id_field, key, values, result)
+        runs.append(run)
+        if run.outcome not in DONE_OUTCOMES:
+            break
+    status = closed_status([run.outcome for run in runs])
+    entry = closed_entry(record, status, [run.entry() for run in runs])
     return TurnOutcome(
-        "\n".join(lines),
+        "\n".join(replies.step_line(TOOLS[r.tool], r.outcome, r.result_id) for r in runs),
         state_delta={"pending": None, "history": appended(history, entry)},
         route="confirmed",
-        results=results,
+        results=runs,
     )
 
 

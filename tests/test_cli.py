@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import redis
 import redis.asyncio as redis_asyncio
 from google.adk import Runner
 from google.adk.apps import App
@@ -24,11 +25,14 @@ import assistant.cli
 from assistant.agent import build_root_agent
 from assistant.cli import _without_password, chat
 from assistant.interpreter import build_interpreter
+from core.confirmation import shown_values
+from core.executions import execution_key
 from core.instruction import pending_summary
 from core.interpretation import TurnInterpretation
+from core.registry import TOOLS
 from core.turn import TurnInput, handle_turn
 from tests.fake_llm import ScriptedLlm, system_text
-from tests.interpretations import FIXED, NOW
+from tests.interpretations import FIXED, NOW, SESSION
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -58,7 +62,7 @@ async def test_chat_prints_only_replies():
     question = handle_turn(
         None,
         TurnInterpretation.model_validate(FIXED["A1"].interpretation),
-        TurnInput(FIXED["A1"].message, NOW),
+        TurnInput(FIXED["A1"].message, NOW, SESSION),
     ).reply
     assert text == f"> {FIXED['A1'].message}\n{question}\n"
     assert "{" not in text and '"act"' not in text  # nothing from the interpreter
@@ -98,8 +102,9 @@ async def test_run_creates_a_session_per_run_and_continues_it(redis_url, monkeyp
     fake = ScriptedLlm(
         script=[json.dumps(FIXED["A1"].interpretation), json.dumps(FIXED["B2"].interpretation)]
     )
-    app = App(name="assistant", root_agent=build_root_agent(build_interpreter(fake)))
-    monkeypatch.setattr(assistant.cli, "app", app)
+    # Task 11: the CLI builds its own agent (with the Redis registry), so the interpreter is
+    # what gets replaced.
+    monkeypatch.setattr(assistant.cli, "interpreter", build_interpreter(fake))
     monkeypatch.setenv("REDIS_URL", redis_url)
     monkeypatch.setenv("GOOGLE_API_KEY", "fake-key-never-sent")  # only passes the startup check
 
@@ -112,7 +117,7 @@ async def test_run_creates_a_session_per_run_and_continues_it(redis_url, monkeyp
         a1 = handle_turn(
             None,
             TurnInterpretation.model_validate(FIXED["A1"].interpretation),
-            TurnInput(FIXED["A1"].message, NOW),
+            TurnInput(FIXED["A1"].message, NOW, SESSION),
         )
         assert first.out == f"> {FIXED['A1'].message}\n{a1.reply}\n"
 
@@ -124,7 +129,7 @@ async def test_run_creates_a_session_per_run_and_continues_it(redis_url, monkeyp
         b2 = handle_turn(
             a1.state_delta["pending"],
             TurnInterpretation.model_validate(FIXED["B2"].interpretation),
-            TurnInput(FIXED["B2"].message, NOW),
+            TurnInput(FIXED["B2"].message, NOW, SESSION),
         )
         assert b2.route == "same_tool"
         assert second.out == f"> {FIXED['B2'].message}\n{b2.reply}\n"
@@ -160,3 +165,80 @@ async def test_run_creates_a_session_per_run_and_continues_it(redis_url, monkeyp
 )
 def test_redis_url_in_messages_never_shows_a_password(url, shown):
     assert _without_password(url) == shown
+
+
+# Brief 11 -------------------------------------------------------------------------------------
+
+
+def h1_values() -> dict:
+    """The normalized values `create_ticket` receives for `H1` (no date: independent of now)."""
+    pending = handle_turn(
+        None,
+        TurnInterpretation.model_validate(FIXED["H1"].interpretation),
+        TurnInput(FIXED["H1"].message, NOW, SESSION),
+    ).state_delta["pending"]
+    [step] = shown_values(pending["steps"], NOW)
+    return step["normalized"]
+
+
+# 19: the CLI keeps its executions in Redis, and `MOCK_FAIL` makes a tool answer a failure.
+async def test_cli_uses_the_redis_registry_and_mock_fail(redis_url, monkeypatch, capsys):
+    for name in list(TOOLS):  # the CLI replaces tools in TOOLS; monkeypatch restores them
+        monkeypatch.setitem(TOOLS, name, TOOLS[name])
+    script = [json.dumps(FIXED[key].interpretation) for key in ("H1", "B4", "H1", "B4")]
+    fake = ScriptedLlm(script=script)
+    monkeypatch.setattr(assistant.cli, "interpreter", build_interpreter(fake))
+    monkeypatch.setenv("REDIS_URL", redis_url)
+    monkeypatch.setenv("GOOGLE_API_KEY", "fake-key-never-sent")  # only passes the startup check
+    monkeypatch.delenv("MOCK_FAIL", raising=False)
+    conversation = f"{FIXED['H1'].message}\n{FIXED['B4'].message}\n"
+    values = h1_values()
+    check = redis.Redis.from_url(redis_url, decode_responses=True)
+    session_ids, keys = [], []
+    try:
+        monkeypatch.setattr(sys, "stdin", io.StringIO(conversation))
+        assert await assistant.cli._run(None) == 0
+        captured = capsys.readouterr()
+        [session_id] = _new_session_ids(captured.err)
+        session_ids.append(session_id)
+        keys.append(f"idem:{execution_key(session_id, 'create_ticket', values)}")
+        assert "Listo: creé el ticket " in captured.out
+        assert json.loads(check.get(keys[0]))["status"] == "done"
+        assert 0 < check.ttl(keys[0]) <= 86400
+
+        monkeypatch.setenv("MOCK_FAIL", "create_ticket")
+        monkeypatch.setattr(sys, "stdin", io.StringIO(conversation))
+        assert await assistant.cli._run(None) == 0
+        captured = capsys.readouterr()
+        [session_id] = _new_session_ids(captured.err)
+        session_ids.append(session_id)
+        keys.append(f"idem:{execution_key(session_id, 'create_ticket', values)}")
+        assert "MOCK_FAIL: create_ticket" in captured.err
+        assert captured.out.endswith(
+            "No pude crear un ticket: la herramienta respondió con un error. "
+            "Si me lo pides de nuevo, lo intento otra vez.\n"
+        )
+        assert "Listo" not in captured.out
+        assert check.exists(keys[1]) == 0  # D9.3: released
+        assert fake.calls == 4
+    finally:
+        if keys:
+            check.delete(*keys)
+        check.close()
+        client = redis_asyncio.from_url(redis_url, decode_responses=True)
+        service = RedisSessionService(redis_client=client)
+        for session_id in session_ids:
+            await service.delete_session(
+                app_name="assistant", user_id=assistant.cli.USER_ID, session_id=session_id
+            )
+        await client.aclose()
+
+
+def test_cli_exits_clearly_with_an_unknown_mock_fail(redis_url):
+    result = run_cli(REDIS_URL=redis_url, GOOGLE_API_KEY="fake-key-never-sent", MOCK_FAIL="pizza")
+
+    assert result.returncode == 1
+    assert "MOCK_FAIL" in result.stderr and "pizza" in result.stderr
+    assert "create_ticket" in result.stderr  # the names it accepts
+    assert "Traceback" not in result.stderr
+    assert result.stdout == ""
