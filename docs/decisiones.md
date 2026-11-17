@@ -1406,3 +1406,55 @@ decidida por el autor
   provocar).
 - **Pendiente:** la tarea 19 documenta que un reintento que termina bien no deja rastro en la
   CLI, como límite de observabilidad (TASK.md línea 471).
+
+**D37 · Tarea 07: detalles de la fusión de D4** (2026-11-17) · autodecidida por el
+orquestador; revisable
+
+- **Decisión:** `core/merge.py` (`merge_args`, `anchored`) fija estos detalles de D4. Ninguno
+  cambia lo que ve el usuario fuera de entradas mal formadas, así que van en una línea cada
+  uno, por la regla del autor del 2026-11-17 (hallazgo 10 de la revisión del backlog).
+  - *Palabra completa (regla 3):* las palabras `\w+` del texto normalizado ("asígnalo" es una;
+    "Ana-María", dos).
+  - *Agregar uno que ya está (regla 6):* se mide contra la base del turno (`<campo>` si llegó; si
+    no, lo guardado).
+  - *Mismo nombre en `_add` y `_remove` (regla 6):* solo la nota `add_and_remove`, nunca también
+    `remove_absent`; si estaba guardado, se quita.
+  - *`Rejected.key`:* la clave tal como llegó (`attendees_add`), para el log de la tarea 08; la
+    respuesta no muestra el nombre (regla 9).
+  - *Lo guardado (regla 10):* pasa por `presence.clean` y solo quedan campos del contrato.
+  - *Reemplazo con todos sus nombres rechazados (reglas 2 y 3):* cuenta como no enviado; la
+    lista guardada se conserva.
+  - *`_remove` (regla 3):* sus nombres también se anclan ("cada nombre de cada cubeta").
+  - *Nombre repetido en una cubeta (regla 2):* se guarda una vez, con la primera grafía, sin
+    nota.
+  - *Igualdad fuera de cadenas (regla 5):* exige el mismo tipo; `30` → `30.0` es un
+    `overwrite`.
+- **Motivo:** es la lectura más literal de las reglas 2, 3, 5, 6 y 10 de D4 (TASK.md líneas
+  145 y 184).
+- **Pendiente:** "agregar uno que ya está" contra la base del turno no tiene test (revisión de
+  la tarea 07, ronda 3, hallazgo 1); lo cierra la tarea 08. Por la regla 9 de D4, si el modelo
+  llena `attendees` y `attendees_add` con el mismo nombre en un flujo nuevo, la respuesta dirá
+  que ya estaba aunque no había nada guardado.
+
+**D38 · Fusión: un nombre igual al guardado pero no escrito en el mensaje se rechaza**
+(2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** `merge_args` ancla cada valor `person` y cada nombre de lista que llega en el
+  turno, aunque coincida con el guardado. Con `assignee="Carlos"` guardado, un
+  `assignee="Carlos"` que llega con "Sí, hazlo" da `Rejected("assignee", "Carlos")`, ningún
+  cambio y "Carlos" sigue guardado. Son D4 reglas 3 y 4 al pie de la letra: la regla 4 exime
+  al valor guardado, no al que llega igual.
+- **Lo que ve el usuario:** por lo que D4 exige a D7 (D7, *Cumple*), ese "sí" no cuenta: no
+  ejecuta, la respuesta lleva la línea fija de nombre rechazado (D4 regla 9) y vuelve a pedir
+  la confirmación. En el caso G (TASK.md líneas 430-438), un modelo que repitiera el
+  destinatario en cada "sí" impediría ejecutar.
+- **Motivo:** solo pasa si el modelo inventa el valor, porque no ve lo guardado
+  (`include_contents='none'` y resumen sin valores, D2 y D14); un nombre que el mensaje no dice
+  no viene del usuario (línea 184). Aceptarlo por coincidir con lo guardado haría depender el
+  anclaje de lo guardado, y el "sí" se ata a la operación mostrada (líneas 282-284). En la
+  prueba de humo, `G2` ("Sí, hazlo") volvió sin operaciones (D32).
+- **Descartada:** no anclar un valor igual al guardado (sin cambio ni rechazo; el "sí" contaría).
+- **Pendiente:** ningún test lo fija; las revisiones de la tarea 07 lo corrieron a mano. Las
+  tareas 09b y 10a (caso G) lo tienen en cuenta. Vale mientras `last_question` no lleve valores
+  (D2, D14): si la 09b guarda ahí la confirmación de D7.1 con los valores normalizados, el
+  modelo los vería y podría repetirlos.
