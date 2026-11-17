@@ -206,11 +206,7 @@ TOOLS: dict[str, ToolSpec] = {
 
 
 def fields_of_kind(kind: FieldKind) -> list[tuple[str, FieldSpec]]:
-    """All `(tool_name, field)` pairs of the given kind across the whole catalog.
-
-    The interpreter schema uses this to add the `_add`/`_remove` buckets to every
-    `person_list` field without naming any tool (D2 amendment).
-    """
+    """All `(tool_name, field)` pairs of the given kind across `TOOLS`, in catalog order."""
     return [
         (tool.name, spec) for tool in TOOLS.values() for spec in tool.fields if spec.kind == kind
     ]

@@ -328,3 +328,19 @@ def test_schema_is_accepted_by_the_developer_api():
     from google.genai._transformers import t_schema
 
     assert t_schema(SimpleNamespace(vertexai=False), TurnInterpretation) is not None
+
+
+# Note (b) of task 02
+def test_args_model_rejects_catalogs_it_cannot_represent():
+    two_kinds = {
+        "a": _fake_tool("a", ("when", FieldKind.TEXT)),
+        "b": _fake_tool("b", ("when", FieldKind.DATE)),
+    }
+    with pytest.raises(ValueError, match="two kinds"):
+        build_args_model(two_kinds)
+
+    bucket_clash = {
+        "a": _fake_tool("a", ("watchers", FieldKind.PERSON_LIST), ("watchers_add", FieldKind.TEXT))
+    }
+    with pytest.raises(ValueError, match="clashes"):
+        build_args_model(bucket_clash)

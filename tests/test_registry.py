@@ -191,7 +191,8 @@ def test_contract_rejects_unknown_fields(canonical_args):
 def test_core_imports_no_adk():
     # A fresh process: in this one, another test may already have imported ADK.
     code = (
-        "import sys, core.registry, core.mock_tools, core.interpretation, core.instruction; "
+        "import sys, core.registry, core.mock_tools, core.interpretation, core.instruction, "
+        "core.presence, core.replies, core.turn; "
         "print(sorted(m for m in sys.modules if m.startswith('google.adk')))"
     )
     result = subprocess.run(

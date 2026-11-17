@@ -72,3 +72,14 @@ def test_pending_summary_has_no_collected_values():
 def test_pending_summary_when_nothing_is_pending():
     assert pending_summary(None) == NOTHING_PENDING
     assert pending_summary({}) == NOTHING_PENDING
+
+
+# Note (f) of task 02 (D16)
+def test_pending_summary_with_a_partial_record():
+    summary = pending_summary({"status": "collecting"})
+    assert "Pending tools: none" in summary
+    assert "Status: collecting" in summary
+    assert "Missing fields: none" in summary
+    assert "Last question to the user: none" in summary
+
+    assert "Status: unknown" in pending_summary({"tools": ["create_ticket"]})
