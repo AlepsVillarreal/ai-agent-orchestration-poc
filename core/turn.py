@@ -19,6 +19,13 @@ Order of a turn (D3, *Compuerta de entrada*):
    operations by certainty and never looks at tool names (TASK.md line 562). R2 anchors and
    merges against an empty record (D4 rule 4), so a name not written in the message never
    gets in and the `_add`/`_remove` buckets are applied, never stored (D4 rule 10).
+5. After every merge (R2 and *Misma tool*) each step is validated (`core/validation.py`, D5):
+   `missing` and `invalid` (`{tool, field, cause}`, never a value) come from the validator and
+   go to the record, whose `status` stays `collecting`. One reply names the invalid fields
+   (with their allowed values) after the change lines, then asks once for every missing or
+   invalid field (`last_question`, D17: labels only). A complete step closes with a provisional
+   template; nothing runs (D7.1). Dates and times have no rule until task 09b, so a step with
+   one is never ready; `unchecked` is recomputed, never stored.
 
 The message text is used only to anchor names (D4 rule 3): it goes neither to the state nor to
 the log.
@@ -31,8 +38,8 @@ from typing import Any
 from core import replies
 from core.interpretation import Act, Certainty, TurnInterpretation
 from core.merge import Change, MergeResult, Rejected, merge_args
-from core.presence import missing_fields
 from core.registry import TOOLS, FieldKind, ToolSpec, list_buckets
+from core.validation import validate
 
 
 @dataclass(frozen=True)
@@ -53,6 +60,7 @@ class TurnOutcome:
     route: str = ""  # which branch decided the turn: "R2", "d11", ... (tests and the log read it)
     changes: list[Change] = field(default_factory=list)  # for the log (D4 rule 8)
     rejected: list[Rejected] = field(default_factory=list)  # for the log (D4 rule 3)
+    invalid: list[dict] = field(default_factory=list)  # the record's `invalid`, for the log (D5)
 
 
 def handle_turn(
@@ -123,7 +131,7 @@ def _start_flow(operation: dict, message: str) -> TurnOutcome:
     merged = merge_args(tool, {}, operation["args"], message)
     steps = [{"tool": tool.name, "args": merged.args}]
     record = {"status": "collecting", "tools": [tool.name], "steps": steps}
-    record.update(_missing_and_question(steps))
+    record.update(_validation_state(steps))
     return _collecting_outcome(record, [(tool, merged)], route="R2")
 
 
@@ -149,23 +157,43 @@ def _same_tool(pending: dict, operations: list[dict], message: str) -> TurnOutco
         return _collecting_outcome(pending, merges, route="same_tool", changed=False)
 
     record = {**pending, "steps": steps}  # `status` stays `collecting`
-    record.update(_missing_and_question(steps))
+    record.update(_validation_state(steps))
     return _collecting_outcome(record, merges, route="same_tool")
 
 
-def _missing_and_question(steps: list[dict]) -> dict[str, Any]:
-    """`missing` (by presence until the validator of task 09a) and `last_question` (D17, D19).
+def _validation_state(steps: list[dict]) -> dict[str, Any]:
+    """`missing`, `invalid` and `last_question` of the record, from the validator (D5).
 
-    The question never carries a collected value or a change line (D2, D14).
+    `missing` is only what is absent; `invalid` lists `{tool, field, cause}` without the value.
+    The question names every missing and invalid field of each step by its label, in registry
+    order, and never carries a collected or an allowed value (D2, D14, D17). It is None when
+    nothing is missing or invalid (D19).
     """
-    missing, questions = [], []
+    missing, invalid, questions = [], [], []
     for step in steps:
         tool = TOOLS[step["tool"]]
-        absent = missing_fields(tool, step["args"])
-        missing.extend(absent)
-        if absent:
-            questions.append(replies.missing_question(tool, absent))
-    return {"missing": missing, "last_question": " ".join(questions) or None}
+        validation = validate(tool, step["args"])
+        missing += validation.missing
+        invalid += [
+            {"tool": tool.name, "field": item.field, "cause": item.cause}
+            for item in validation.invalid
+        ]
+        to_ask = validation.missing + [item.field for item in validation.invalid]
+        if to_ask:
+            questions.append(replies.missing_question(tool, to_ask))
+    return {"missing": missing, "invalid": invalid, "last_question": " ".join(questions) or None}
+
+
+def _closing_line(record: dict) -> str:
+    """The question, or a provisional template when nothing is missing or invalid.
+
+    `unchecked` (a date or a time with no rule yet, task 09b) is recomputed here, not stored.
+    """
+    if record["last_question"]:
+        return record["last_question"]
+    if any(validate(TOOLS[step["tool"]], step["args"]).unchecked for step in record["steps"]):
+        return replies.DATE_TIME_NOT_CHECKED_YET
+    return replies.READY_NOT_AVAILABLE_YET
 
 
 def _collecting_outcome(
@@ -174,10 +202,11 @@ def _collecting_outcome(
     route: str,
     changed: bool = True,
 ) -> TurnOutcome:
-    """Reply: change and note lines, the rejected-name line, then the question (D4 rule 9).
+    """Reply: change and note lines, the rejected-name line, the invalid lines, then the
+    question (D4 rule 9, D39, D5).
 
-    Nothing runs here even when every field is present: validation and confirmation come
-    first (D7.1).
+    The invalid lines come from the record, so a turn that changes nothing repeats the stored
+    ones. Nothing runs here even when every field is valid: confirmation comes first (D7.1).
     """
     lines, changes, rejected = [], [], []
     for tool, merged in merges:
@@ -188,7 +217,11 @@ def _collecting_outcome(
         rejected += merged.rejected
     if rejected:
         lines.append(replies.REJECTED_NAME_LINE)
-    lines.append(record["last_question"] or replies.READY_NOT_AVAILABLE_YET)
+    invalid = record.get("invalid", [])
+    for item in invalid:
+        specs = {spec.name: spec for spec in TOOLS[item["tool"]].fields}
+        lines.append(replies.invalid_line(specs[item["field"]], item["cause"]))
+    lines.append(_closing_line(record))
 
     return TurnOutcome(
         "\n".join(lines),
@@ -196,6 +229,7 @@ def _collecting_outcome(
         route=route,
         changes=changes,
         rejected=rejected,
+        invalid=invalid,
     )
 
 

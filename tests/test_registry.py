@@ -188,11 +188,26 @@ def test_contract_rejects_unknown_fields(canonical_args):
         )
 
 
+# Task 09a: the validator reads its parameters from the field, never from tool or field names.
+def test_value_labels_and_int_ranges_are_declared_per_field():
+    for tool in TOOLS.values():
+        for spec in tool.fields:
+            assert set(spec.value_labels) == set(spec.allowed), (tool.name, spec.name)
+            assert all(label.strip() for label in spec.value_labels.values())
+            assert (spec.int_range is not None) == (spec.kind == FieldKind.INT), spec.name
+    assert _field("schedule_meeting", "duration_minutes").int_range == (1, 480)  # D5.3
+    assert _field("create_ticket", "priority").value_labels == {
+        "low": "baja",
+        "medium": "media",
+        "high": "alta",
+    }
+
+
 def test_core_imports_no_adk():
     # A fresh process: in this one, another test may already have imported ADK.
     code = (
         "import sys, core.registry, core.mock_tools, core.interpretation, core.instruction, "
-        "core.presence, core.replies, core.turn, core.merge; "
+        "core.presence, core.replies, core.turn, core.merge, core.validation; "
         "print(sorted(m for m in sys.modules if m.startswith('google.adk')))"
     )
     result = subprocess.run(

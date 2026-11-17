@@ -6,7 +6,8 @@ synonym tables, the name of the result ID field, the contract and the function t
 Adding a tool means adding one `ToolSpec` to `TOOLS` (TASK.md line 562).
 
 Rules elsewhere (merge, validation, list buckets) are declared per field *kind*, never per tool,
-so they keep working as the catalog grows (D4 rule 1; D2 amendment).
+so they keep working as the catalog grows (D4 rule 1; D2 amendment). Their parameters (allowed
+values, synonyms, ranges) live on each `FieldSpec`.
 """
 
 from collections.abc import Callable
@@ -47,6 +48,9 @@ class FieldSpec:
     label: str  # Spanish, used when asking for it: "la prioridad", "a quién se asigna"
     allowed: tuple[str, ...] = ()  # canonical values of a `word` field
     synonyms: dict[str, tuple[str, ...]] = field(default_factory=dict)  # canonical -> words
+    # Spanish name of each value of `allowed`, for replies: "alta" for "high" (tasks 09a-10b).
+    value_labels: dict[str, str] = field(default_factory=dict)
+    int_range: tuple[int, int] | None = None  # inclusive bounds of an `int` field (D5.3)
 
     def resolve_word(self, word: str) -> str | None:
         """Map the user's word to its canonical value ("Alta" -> "high"), or None if unknown.
@@ -110,6 +114,7 @@ TOOLS: dict[str, ToolSpec] = {
                     "medium": ("medium", "media"),
                     "low": ("low", "baja"),
                 },
+                value_labels={"low": "baja", "medium": "media", "high": "alta"},
             ),
             FieldSpec(
                 name="assignee",
@@ -154,6 +159,7 @@ TOOLS: dict[str, ToolSpec] = {
                 description="Meeting length as a number of minutes. Convert words to a "
                 "number ('media hora' -> 30, 'una hora' -> 60).",
                 label="la duración en minutos",
+                int_range=(1, 480),  # D5.3: up to 8 h; 0 and negatives are invalid
             ),
             FieldSpec(
                 name="attendees",
@@ -196,6 +202,7 @@ TOOLS: dict[str, ToolSpec] = {
                     "sms": ("sms", "mensaje de texto"),
                     "push": ("push", "notificación push"),
                 },
+                value_labels={"email": "correo", "sms": "SMS", "push": "push"},
             ),
         ),
         contract=SendNotificationArgs,

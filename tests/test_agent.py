@@ -426,3 +426,74 @@ def test_message_text_joins_text_parts():
     assert message_text(with_empty) == "Ana"
     assert message_text(types.Content(role="user")) == ""
     assert message_text({"text": "Ana"}) == ""
+
+
+# Brief 09a ------------------------------------------------------------------------------------
+
+
+# 16 (finding 5 of backlog-04): the validator runs in the node's turn; the log names the invalid
+# field and its cause, never the value.
+async def test_invalid_word_through_the_node(monkeypatch, caplog):
+    _no_tool_runs(monkeypatch)
+    caplog.set_level(logging.INFO, logger="assistant")
+    fake = ScriptedLlm(script=[json.dumps(FIXED["X1"].interpretation)])
+    runner, sessions = make_runner(fake)
+
+    events = await run_turn(runner, USER, "s-x", FIXED["X1"].message)
+
+    expected = handle_fixed(None, "X1")
+    assert event_text(reply_events(events)[0]) == expected.reply
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-x")
+    record = session.state["pending"]
+    assert record == expected.state_delta["pending"]
+    assert record["invalid"] == [
+        {"tool": "create_ticket", "field": "priority", "cause": "not_allowed"}
+    ]
+    assert record["missing"] == ["title", "assignee"]
+    assert fake.calls == 1
+
+    [line] = _turn_records(caplog)
+    before_changes = line.split(" changes=")[0]
+    assert "invalid=priority:not_allowed" in before_changes
+    assert "urgente" not in before_changes
+
+
+# 17 (finding 3 of backlog-06): a complete meeting never reaches confirmation before task 09b,
+# and a "yes" afterwards changes nothing.
+async def test_complete_meeting_does_not_reach_confirmation(monkeypatch):
+    _no_tool_runs(monkeypatch)
+    message = "Agenda la revisión del servidor el 20 de noviembre a las 10:30, 30 minutos, con Juan"
+    meeting = {
+        "act": "request_action",
+        "operations": [
+            {
+                "tool": "schedule_meeting",
+                "certainty": "explicit",
+                "args": {
+                    "title": "revisión del servidor",
+                    "date": {"day": 20, "month": 11},
+                    "time": {"hour": 10, "minute": 30},
+                    "duration_minutes": 30,
+                    "attendees": ["Juan"],
+                },
+            }
+        ],
+    }
+    fake = ScriptedLlm(script=[json.dumps(meeting), json.dumps(FIXED["G2"].interpretation)])
+    runner, sessions = make_runner(fake)
+
+    first = await run_turn(runner, USER, "s-meet", message)
+    assert event_text(reply_events(first)[0]).endswith(replies.DATE_TIME_NOT_CHECKED_YET)
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-meet")
+    record = session.state["pending"]
+    assert record["status"] == "collecting"
+    assert record["missing"] == [] and record["invalid"] == []
+    assert record["last_question"] is None
+
+    second = await run_turn(runner, USER, "s-meet", FIXED["G2"].message)
+    [answer] = reply_events(second)
+    assert not answer.actions.state_delta
+    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-meet")
+    assert session.state["pending"] == record
+    assert session.state["pending"]["status"] == "collecting"  # never awaiting_confirmation
+    assert fake.calls == 2

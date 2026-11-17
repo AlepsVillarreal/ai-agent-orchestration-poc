@@ -82,14 +82,17 @@ def log_turn(
     error: str | None = None,
     changes: Sequence[Change] = (),
     rejected: Sequence[Rejected] = (),
+    invalid: Sequence[dict] = (),
 ) -> None:
     """One `key=value` line per turn. `route` comes from the core, never from the reply text.
 
     `ops` lists the operations as the interpreter returned them, before the registry filter, so
     an unknown tool dropped by D10 stays visible. The keys before `changes=` carry no argument
-    value and no message text. A turn the interpreter understood adds, at the end of the line,
-    `changes=` (`field:kind:old->new`, values as JSON; D4 rule 8) and `rejected=` (`key:name`;
-    D4 rule 3), then `ambiguity`, the model's own free text (D2: logged, read by nothing).
+    value and no message text. A turn the interpreter understood adds `invalid=`
+    (`field:cause`, the invalid fields of the pending record, without values; D5), then, at the
+    end of the line, `changes=` (`field:kind:old->new`, values as JSON; D4 rule 8) and
+    `rejected=` (`key:name`; D4 rule 3), then `ambiguity`, the model's own free text (D2:
+    logged, read by nothing).
     """
     act = interpretation.act.value if interpretation else ""
     ops = ",".join(
@@ -100,6 +103,7 @@ def log_turn(
     if error:
         parts.append(f"error={error}")
     if interpretation:
+        parts.append("invalid=" + ",".join(f"{i['field']}:{i['cause']}" for i in invalid))
         parts.append(
             "changes="
             + ",".join(f"{c.field}:{c.kind}:{_value(c.old)}->{_value(c.new)}" for c in changes)
@@ -148,6 +152,7 @@ def build_root_agent(interpreter: LlmAgent) -> Workflow:
             interpretation,
             changes=outcome.changes,
             rejected=outcome.rejected,
+            invalid=outcome.invalid,
         )
         return Event(message=outcome.reply, state=outcome.state_delta)
 

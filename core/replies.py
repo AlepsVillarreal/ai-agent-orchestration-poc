@@ -9,6 +9,7 @@ from typing import Any
 
 from core.merge import Change, Note
 from core.registry import TOOLS, FieldKind, FieldSpec, ToolSpec
+from core.validation import Cause
 
 # D10: something in the request matched no tool, and something else did.
 UNKNOWN_TOOL_LINE = "Parte de tu solicitud no corresponde a ninguna de mis herramientas."
@@ -42,6 +43,12 @@ READY_NOT_AVAILABLE_YET = (
     "Tengo los datos; la validación y la confirmación aún no están disponibles."
 )
 
+# Provisional: every field is in, but a date or a time has no rule yet (task 09b replaces it).
+# It names no tool, so it holds for any step with a `date` or `time` field.
+DATE_TIME_NOT_CHECKED_YET = (
+    "Tengo los datos; todavía no puedo validar fechas ni horas en esta versión."
+)
+
 
 def join_es(items: list[str], last_word: str = "y") -> str:
     """Join items the Spanish way: "a, b y c" (or "a, b o c")."""
@@ -56,14 +63,30 @@ def capabilities() -> str:
     return f"Puedo ayudarte a {actions}. ¿Qué necesitas?"
 
 
-def missing_question(tool: ToolSpec, missing: list[str]) -> str:
-    """One question for all missing fields, with registry labels in registry order.
+def missing_question(tool: ToolSpec, fields: list[str]) -> str:
+    """One question for every missing or invalid field, with registry labels in registry order.
 
-    It never lists allowed values (autodecided F in task 03) and never shows a collected value
-    (D2): it is stored as `last_question`, which the interpreter reads.
+    It never lists allowed values (D17) and never shows a collected value (D2): it is stored as
+    `last_question`, which the interpreter reads. The invalid lines that come before it in the
+    reply may list the allowed values; they are not part of it.
     """
-    labels = [spec.label for spec in tool.fields if spec.name in missing]
+    labels = [spec.label for spec in tool.fields if spec.name in fields]
     return f"Para {tool.action_phrase} necesito {join_es(labels)}."
+
+
+def invalid_line(spec: FieldSpec, cause: Cause) -> str:
+    """One line per invalid field, written by cause and never by tool (TASK.md lines 186-200).
+
+    It names the field and the problem, never the value the user gave (the value was shown by
+    its change line, D39). A `not_allowed` line lists the allowed values in Spanish.
+    """
+    if cause == "not_allowed":
+        options = join_es([spec.value_labels.get(value, value) for value in spec.allowed], "o")
+        return f"No reconozco {spec.label} que indicaste; puede ser {options}."
+    if cause == "out_of_range" and spec.int_range is not None:
+        low, high = spec.int_range
+        return f"{spec.label[:1].upper()}{spec.label[1:]} debe ser un número entre {low} y {high}."
+    return f"No pude leer {spec.label}."
 
 
 def show_value(spec: FieldSpec, value: Any) -> str:
@@ -71,14 +94,19 @@ def show_value(spec: FieldSpec, value: Any) -> str:
 
     Nothing is converted or completed: a date or a time shows the components that arrived
     (day 40 stays 40, a lone hour gets no minutes); resolving them is the validator's job (D5).
+    Surrounding spaces of a string are trimmed, as the validator does (note (hh)).
     """
     if spec.kind == FieldKind.PERSON_LIST:
-        return join_es([str(name) for name in value])
+        return join_es([_trimmed(name) for name in value])
     if spec.kind == FieldKind.DATE:
         return _show_date(value)
     if spec.kind == FieldKind.TIME:
         return _show_time(value)
-    return str(value)
+    return _trimmed(value)
+
+
+def _trimmed(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else str(value)
 
 
 def _show_date(parts: dict[str, Any]) -> str:

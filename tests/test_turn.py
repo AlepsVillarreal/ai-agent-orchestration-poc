@@ -185,8 +185,8 @@ def test_case_a_creates_pending_and_asks_for_missing():
     assert reply.endswith(record["last_question"])
 
 
-# 11
-@pytest.mark.parametrize("key", ["A1", "B2", "F1"])
+# 11 (task 09a adds X1: the invalid priority is asked for by its label only)
+@pytest.mark.parametrize("key", ["A1", "B2", "F1", "X1"])
 def test_missing_question_has_no_collected_value_and_no_options(key):
     record = handle_fixed(None, key).state_delta["pending"]
     question = record["last_question"].lower()
@@ -527,6 +527,14 @@ def test_show_value_by_kind(field_name, value, shown):
     assert replies.show_value(_MEETING_FIELDS[field_name], value) == shown
 
 
+# Review 09a-1, should-fix 1 (note (hh)): surrounding spaces are trimmed when a value is shown.
+def test_show_value_trims_spaces():
+    ticket = {spec.name: spec for spec in TOOLS["create_ticket"].fields}
+    assert replies.show_value(ticket["assignee"], " Carlos ") == "Carlos"  # person
+    assert replies.show_value(ticket["title"], "  Servidor caído ") == "Servidor caído"  # text
+    assert replies.show_value(_MEETING_FIELDS["attendees"], [" Ana ", "Juan "]) == "Ana y Juan"
+
+
 def test_case_d_reply_names_every_component():
     lines = _lines(handle_fixed(None, "D1").reply)
     assert "Anoté la fecha: día 40, mes 11." in lines
@@ -549,3 +557,130 @@ def test_same_tool_needs_a_collecting_record():
     outcome = handle_fixed(clarifying, "K2")
     assert outcome.route == "pending_provisional"
     assert outcome.state_delta == {}
+
+
+# Brief 09a ------------------------------------------------------------------------------------
+
+_TICKET_FIELDS = {spec.name: spec for spec in TOOLS["create_ticket"].fields}
+
+# A meeting with every field (the date and the time have no rule until task 09b).
+_COMPLETE_MEETING_MESSAGE = (
+    "Agenda la revisión del servidor el 20 de noviembre a las 10:30, 30 minutos, con Juan y Ana"
+)
+
+
+def _meeting(**args: Any) -> TurnInterpretation:
+    complete = {
+        "title": "revisión del servidor",
+        "date": {"day": 20, "month": 11},
+        "time": {"hour": 10, "minute": 30},
+        "duration_minutes": 30,
+        "attendees": ["Juan", "Ana"],
+    }
+    return interpretation("request_action", op("schedule_meeting", **{**complete, **args}))
+
+
+# 10 (TASK.md lines 186-200)
+def test_invalid_and_missing_in_one_reply():
+    outcome = handle_fixed(None, "X1")
+    record = outcome.state_delta["pending"]
+
+    assert record["invalid"] == [
+        {"tool": "create_ticket", "field": "priority", "cause": "not_allowed"}
+    ]
+    assert record["missing"] == ["title", "assignee"]
+    assert record["status"] == "collecting"
+    assert record["steps"][0]["args"]["priority"] == "urgente"  # stored as said (D4 rule 7)
+    assert outcome.invalid == record["invalid"]  # for the log
+
+    lines = _lines(outcome.reply)
+    fill = "Anoté la prioridad: urgente."
+    invalid = replies.invalid_line(_TICKET_FIELDS["priority"], "not_allowed")
+    assert "baja, media o alta" in invalid  # from `value_labels`, in the order of `allowed`
+    assert lines.index(fill) < lines.index(invalid) < len(lines) - 1
+    assert lines[-1] == record["last_question"]
+
+    question = record["last_question"].lower()
+    assert "la prioridad" in question
+    for word in ("urgente", "alta", "media", "baja"):
+        assert word not in question, word
+
+
+# 11 (D4 rule 7 both ways)
+def test_correction_clears_invalid():
+    pending = handle_fixed(None, "X1").state_delta["pending"]
+    high = interpretation("provide_info", op("create_ticket", priority="alta"))
+    outcome = handle_turn(pending, high, TurnInput("Alta"))
+    record = outcome.state_delta["pending"]
+
+    assert [(c.field, c.kind, c.old, c.new) for c in outcome.changes] == [
+        ("priority", "overwrite", "urgente", "alta")
+    ]
+    assert record["invalid"] == []
+    assert record["missing"] == ["title", "assignee"]
+    assert "la prioridad" not in record["last_question"]
+    assert outcome.reply.endswith(record["last_question"])
+
+    complete = handle_fixed(None, "H1").state_delta["pending"]
+    assert complete["invalid"] == [] and complete["last_question"] is None
+    urgent = interpretation("provide_info", op("create_ticket", priority="urgente"))
+    outcome = handle_turn(complete, urgent, TurnInput("Mejor urgente"))
+    record = outcome.state_delta["pending"]
+
+    assert record["steps"][0]["args"]["priority"] == "urgente"  # a new invalid value replaces
+    assert record["invalid"] == [
+        {"tool": "create_ticket", "field": "priority", "cause": "not_allowed"}
+    ]
+    assert record["missing"] == []
+    assert record["last_question"] is not None
+    assert "la prioridad" in record["last_question"]
+    assert outcome.reply.endswith(record["last_question"])
+
+
+# 12 (D5.3)
+@pytest.mark.parametrize("minutes", [0, 481])
+def test_duration_out_of_range(minutes):
+    outcome = handle_turn(
+        None, _meeting(duration_minutes=minutes), TurnInput(_COMPLETE_MEETING_MESSAGE)
+    )
+    record = outcome.state_delta["pending"]
+
+    assert record["invalid"] == [
+        {"tool": "schedule_meeting", "field": "duration_minutes", "cause": "out_of_range"}
+    ]
+    assert record["missing"] == []
+    line = replies.invalid_line(_MEETING_FIELDS["duration_minutes"], "out_of_range")
+    assert line in _lines(outcome.reply)
+    assert "1" in line and "480" in line
+    assert record["last_question"] == "Para programar una reunión necesito la duración en minutos."
+    assert outcome.reply.endswith(record["last_question"])
+
+
+# 13 (D9 *Caso H* with an invalid value; D42: no change, no state delta)
+def test_repeated_invalid_request_changes_nothing():
+    pending = handle_fixed(None, "X1").state_delta["pending"]
+    outcome = handle_fixed(pending, "X1")
+
+    assert outcome.route == "same_tool"
+    assert outcome.state_delta == {}
+    assert outcome.changes == []
+    invalid = replies.invalid_line(_TICKET_FIELDS["priority"], "not_allowed")
+    assert outcome.reply == f"{invalid}\n{pending['last_question']}"
+    assert outcome.invalid == pending["invalid"]
+
+
+# 14 (finding 3 of backlog-06: a date or a time is never valid before task 09b)
+def test_complete_meeting_waits_for_dates():
+    outcome = handle_turn(None, _meeting(), TurnInput(_COMPLETE_MEETING_MESSAGE))
+    record = outcome.state_delta["pending"]
+
+    assert record["status"] == "collecting"
+    assert record["missing"] == []
+    assert record["invalid"] == []
+    assert record["last_question"] is None
+    assert outcome.reply.endswith(replies.DATE_TIME_NOT_CHECKED_YET)
+    assert replies.READY_NOT_AVAILABLE_YET not in outcome.reply
+
+    again = handle_turn(record, _meeting(), TurnInput(_COMPLETE_MEETING_MESSAGE))
+    assert again.state_delta == {}
+    assert again.reply == replies.DATE_TIME_NOT_CHECKED_YET
