@@ -487,3 +487,69 @@ def test_resume_needs_run(tmp_path):
     with pytest.raises(SystemExit) as exit_info:
         phase0.run.main(["--resume", str(tmp_path / "previous.jsonl")])
     assert exit_info.value.code == 2
+
+
+# Task 10c: `--only` filters the scenarios and changes nothing else (note (z)).
+ONLY = "C1,N1,S3,A1,E1"
+
+
+def test_only_calls_just_the_ids_asked(monkeypatch, tmp_path, capsys):
+    order = ["A1", "C1", "E1", "N1", "S3"]  # the order of SCENARIOS, not of the flag
+    fake = ScriptedLlm(script=[_expected_json(BY_ID[key].fixture) for key in order])
+    _patch_main(monkeypatch, tmp_path, fake)
+
+    assert phase0.run.main(["--run", "--only", ONLY]) == 0
+
+    assert fake.calls == 5
+    [path] = (tmp_path / "runs").iterdir()
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert [line["id"] for line in lines] == order
+    assert lines[-1]["pending_summary"] == pending_summary(BY_ID["S3"].pending)
+    assert "awaiting_clarification" in lines[-1]["pending_summary"]
+    printed = capsys.readouterr().out
+    assert "Escenarios corridos: 5 de 5" in printed
+    assert "Fallos de forma: 0" in printed
+    assert "Sin veredicto de F0.1" in printed
+    assert "Veredicto F0.1" not in printed
+
+
+@pytest.mark.parametrize("only", ["C1,ZZ", "C1,C1", ""])
+def test_only_rejects_unknown_or_repeated_ids(monkeypatch, tmp_path, only):
+    runs = tmp_path / "runs"
+    monkeypatch.setattr(phase0.run, "RUNS_DIR", runs)
+    monkeypatch.setattr(phase0.run, "load_dotenv", lambda: pytest.fail("read .env"))
+    monkeypatch.setattr(phase0.run, "run_scenarios", lambda *a, **k: pytest.fail("ran"))
+
+    with pytest.raises(SystemExit) as exit_info:
+        phase0.run.main(["--run", "--only", only])
+
+    assert exit_info.value.code == 2
+    assert not runs.exists()
+
+
+def test_only_and_resume_do_not_mix(monkeypatch, tmp_path):
+    fake = ScriptedLlm(script=[])
+    _patch_main(monkeypatch, tmp_path, fake)
+    monkeypatch.setattr(phase0.run, "load_dotenv", lambda: pytest.fail("read .env"))
+
+    with pytest.raises(SystemExit) as exit_info:
+        phase0.run.main(["--run", "--only", "C1", "--resume", str(tmp_path / "x.jsonl")])
+
+    assert exit_info.value.code == 2
+    assert fake.calls == 0
+    assert not (tmp_path / "runs").exists()
+
+
+def test_only_listing_calls_nothing(monkeypatch, tmp_path, capsys):
+    runs = tmp_path / "runs"
+    monkeypatch.setattr(phase0.run, "RUNS_DIR", runs)
+    monkeypatch.setattr(phase0.run, "load_dotenv", lambda: pytest.fail("read .env"))
+    monkeypatch.setattr(phase0.run, "run_scenarios", lambda *a, **k: pytest.fail("ran"))
+
+    assert phase0.run.main(["--only", ONLY]) == 0
+
+    printed = capsys.readouterr().out
+    listed = [line.split()[0] for line in printed.splitlines() if line.startswith("  ")]
+    assert listed == ["A1", "C1", "E1", "N1", "S3"]
+    assert "--run hace 5 llamadas a gemini-3.5-flash-lite" in printed
+    assert not runs.exists()

@@ -3,6 +3,7 @@
     uv run python -m phase0.run          # list the scenarios; no model, no `.env`, no files
     uv run python -m phase0.run --run    # one real model call per scenario (task 06)
     uv run python -m phase0.run --run --resume RUTA   # call only what RUTA did not save
+    uv run python -m phase0.run --run --only C1,N1    # only those ids, in SCENARIOS order (10c)
 
 Run it from the repository root: `phase0.scenarios` imports `tests.interpretations`.
 
@@ -276,14 +277,14 @@ def format_report(result: RunResult) -> str:
     return "\n".join(lines)
 
 
-def list_scenarios() -> str:
-    lines = [f"{len(SCENARIOS)} escenarios de la fase 0 (D2):"]
-    for scenario in SCENARIOS:
+def list_scenarios(scenarios: list[Scenario] = SCENARIOS) -> str:
+    lines = [f"{len(scenarios)} escenarios de la fase 0 (D2):"]
+    for scenario in scenarios:
         status = scenario.pending["status"] if scenario.pending else "nada pendiente"
         lines.append(f"  {scenario.id:<3} [{status}] {FIXED[scenario.fixture].message}")
     lines += [
         "",
-        f"--run hace {len(SCENARIOS)} llamadas a {MODEL}, una por escenario; el cliente "
+        f"--run hace {len(scenarios)} llamadas a {MODEL}, una por escenario; el cliente "
         f"reintenta un 429 o un 503 hasta {RETRY_OPTIONS.attempts} intentos.",
     ]
     return "\n".join(lines)
@@ -351,17 +352,39 @@ def _log_http_retries() -> None:
         logger.addHandler(handler)
 
 
-async def _run_and_save(saved: dict[str, str] | None, resumed_from: Path | None) -> int:
+async def _run_and_save(
+    saved: dict[str, str] | None,
+    resumed_from: Path | None,
+    scenarios: list[Scenario] = SCENARIOS,
+) -> int:
     RUNS_DIR.mkdir(exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     path = RUNS_DIR / f"{stamp}-{MODEL}.jsonl"
     with path.open("w", encoding="utf-8") as out:
-        result = await run_scenarios(harness_model(), SCENARIOS, out, saved=saved)
+        result = await run_scenarios(harness_model(), scenarios, out, saved=saved)
     if resumed_from is not None:
         result.resumed_from = str(resumed_from)
     print(format_report(result))
     print(f"Salida cruda: {path}")
     return 1 if result.stopped_at else 0
+
+
+def select_scenarios(only: str) -> list[Scenario]:
+    """The scenarios named in `--only` ("C1,N1,..."), in the order of `SCENARIOS`.
+
+    An unknown or repeated id, or an empty list, raises `ValueError` with the reason.
+    """
+    ids = [item.strip() for item in only.split(",")]
+    if not any(ids):
+        raise ValueError("--only necesita al menos un id")
+    known = {scenario.id for scenario in SCENARIOS}
+    unknown = [item for item in ids if item not in known]
+    if unknown:
+        raise ValueError(f"--only: id desconocido {', '.join(map(repr, unknown))}")
+    repeated = sorted({item for item in ids if ids.count(item) > 1})
+    if repeated:
+        raise ValueError(f"--only: id repetido {', '.join(map(repr, repeated))}")
+    return [scenario for scenario in SCENARIOS if scenario.id in ids]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -375,11 +398,24 @@ def main(argv: list[str] | None = None) -> int:
         metavar="RUTA",
         help="con --run: copia lo guardado en ese JSONL y llama solo a lo que falta",
     )
+    parser.add_argument(
+        "--only",
+        metavar="ID,…",
+        help="solo esos escenarios, en el orden de siempre (no se combina con --resume)",
+    )
     args = parser.parse_args(argv)
     if args.resume is not None and not args.run:
         parser.error("--resume solo va junto con --run")
+    scenarios = SCENARIOS
+    if args.only is not None:
+        if args.resume is not None:
+            parser.error("--only no se combina con --resume")
+        try:
+            scenarios = select_scenarios(args.only)
+        except ValueError as ex:  # before `.env`, any call or any file
+            parser.error(str(ex))
     if not args.run:
-        print(list_scenarios())
+        print(list_scenarios(scenarios))
         return 0
 
     saved = None
@@ -392,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
 
     load_dotenv()  # only with --run: the listing never reads `.env`
     _log_http_retries()
-    return asyncio.run(_run_and_save(saved, args.resume))
+    return asyncio.run(_run_and_save(saved, args.resume, scenarios))
 
 
 if __name__ == "__main__":

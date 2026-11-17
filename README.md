@@ -77,6 +77,12 @@ uv run python -m phase0.run --run
 
 # Reanuda una corrida detenida: copia lo que ese JSONL ya guardó y llama solo a lo que falta
 uv run python -m phase0.run --run --resume phase0/runs/<fecha>-<modelo>.jsonl
+
+# Solo esos escenarios (aquí, 5 llamadas); sin --run, solo los lista
+uv run python -m phase0.run --run --only C1,N1,S3,A1,E1
+
+# Juzga un JSONL guardado con las reglas del núcleo (C1, N1, S3, A1, E1); no llama al modelo
+uv run python -m tests.case_c_judge phase0/runs/<fecha>-<modelo>.jsonl
 ```
 
 - `--run` necesita `GOOGLE_API_KEY` en `.env` (no necesita Redis) y consume hasta 23 llamadas de la cuota gratuita, con 13 s de espera entre llamadas reales (la página de límites no publica los de la capa gratuita para el modelo; 13 s cabe en 5 por minuto).
@@ -84,7 +90,9 @@ uv run python -m phase0.run --run --resume phase0/runs/<fecha>-<modelo>.jsonl
 - La salida cruda queda en `phase0/runs/<fecha>-<modelo>.jsonl`, una línea por escenario. El informe en stdout da los fallos de forma y el veredicto de F0.1.
 - Si el modelo sigue fallando tras los reintentos (o hay un timeout o falta la clave), la corrida se detiene en ese escenario, sale con código 1 y no da veredicto.
 - `--resume` (solo junto con `--run`) escribe un JSONL nuevo de 23 líneas: copia sin cambios las líneas que ya tenían salida y sin error, y llama solo a los escenarios que faltan; el archivo anterior no se modifica (D29). Si ese archivo no es de este arnés o no coincide con los escenarios actuales, sale con código 2 sin llamar al modelo ni crear archivos.
+- `--only ID,…` corre o lista solo esos escenarios, en el orden de siempre; no se combina con `--resume`, y un id desconocido o repetido sale con código 2 sin llamar al modelo. Con menos de 23 escenarios el informe da los fallos de forma, pero no el veredicto de F0.1 (D53).
 - La prueba de humo de la tarea 06 está en `phase0/runs/`, con una nota por corrida: 0/23 fallos de forma, así que se mantiene la opción B (D32).
+- La medición del caso C de la tarea 10c (dos rondas de 5 llamadas, con nota) también está ahí: con `gemini-3.5-flash-lite`, "Avísale a Carlos que mañana revisamos el servidor" se lee solo como notificación, así que el agente pide el canal en vez de preguntar si también se quiere una reunión; es una limitación documentada (D52).
 - Los umbrales de D2 se miden solo con esta prueba de humo: la corrida completa de 207 llamadas no se hace (F0.2).
 
 ## Tests

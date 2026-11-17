@@ -7,6 +7,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from core.interpretation import (
+    CERTAINTY_MEANINGS,
     Act,
     Certainty,
     DateParts,
@@ -345,3 +346,45 @@ def test_args_model_rejects_catalogs_it_cannot_represent():
     }
     with pytest.raises(ValueError, match="clashes"):
         build_args_model(bucket_clash)
+
+
+# Task 10c (D33): the only texts the case C adjustment may change stay short and generic.
+_MEASURED_WORDS = ("avísale", "mañana", "revisamos", "servidor", "disponible")
+
+
+def _certainty_texts() -> dict[str, str]:
+    schema = TurnInterpretation.model_json_schema()
+    return {
+        "explicit": CERTAINTY_MEANINGS[Certainty.EXPLICIT],
+        "plausible": CERTAINTY_MEANINGS[Certainty.PLAUSIBLE],
+        "Certainty docstring": schema["$defs"]["Certainty"]["description"],
+        "ambiguity_reason": schema["properties"]["ambiguity_reason"]["description"],
+    }
+
+
+def test_certainty_texts_stay_short_and_generic():
+    forbidden = {*TOOLS, "ticket", "meeting", "notification", *_MEASURED_WORDS}
+    fixed_values = {
+        value
+        for fixed in FIXED.values()
+        for operation in fixed.interpretation["operations"]
+        for value in operation["args"].values()
+        if isinstance(value, str)
+    }
+    for name, text in _certainty_texts().items():
+        assert len(text) <= 250, name
+        assert text.isascii(), name  # English, and no word quoted from a Spanish message
+        lowered = text.lower()
+        assert not [word for word in forbidden if word in lowered], name
+        assert not [value for value in fixed_values if value.lower() in lowered], name
+        # No "if the message says X, then Y" rule: no quoted example, no "then".
+        assert not re.search(r"['\"]|\bthen\b", text), name
+
+    # The shape F0.1 measured (D32) is unchanged: same fields, same certainty values.
+    assert set(TurnInterpretation.model_fields) == {
+        "act",
+        "operations",
+        "confirms_tool",
+        "ambiguity_reason",
+    }
+    assert {value.value for value in Certainty} == {"explicit", "plausible"}
