@@ -2344,7 +2344,7 @@ autodecidida por el orquestador; revisable
   `reused` y el mismo `result`), `test_started_without_done_is_uncertain`,
   `test_failed_result_releases_the_key` y `test_steps_after_one_that_does_not_complete_never_run`.
 - **Pendiente:** la 14b decide cómo se ven los pasos no intentados de un plan, que hoy no se
-  listan.
+  listan. [resuelto en D89]
 
 **D60 · Solo un éxito legible cierra `done`; una excepción o un resultado mal formado es
 `uncertain`** (2026-11-17) · autodecidida por el orquestador; revisable
@@ -2392,7 +2392,8 @@ autodecidida por el orquestador; revisable
   - *`ValidationError` del contrato:* se sabe que nada corrió y aun así la clave queda `started`
     24 h y el usuario lee "No pude confirmar…". Es inalcanzable (los valores ya pasaron el
     validador); la 14b lo vuelve a mirar si añade el `ticket_id` al `message` después de validar
-    (revisión de la tarea 11, ronda 1, nota 9).
+    (revisión de la tarea 11, ronda 1, nota 9). [resuelto en D90: sigue inalcanzable con el
+    número; límite para la 19]
   - *Un `done` ilegible:* la rama de `from_stored` que lo da por `uncertain` no tiene test (ronda
     2, nota 2).
   - *Resto en Redis:* un resultado JSON que Redis no puede codificar en UTF-8 (un sustituto
@@ -2431,7 +2432,8 @@ autodecidida por el orquestador; revisable
   `test_timeout_is_uncertain_and_never_retried`, `test_result_line_per_tool` y
   `test_result_line_reads_the_registry_id_field`.
 - **Pendiente:** la redacción del reporte de un plan con un paso hecho y otro fallido es de la 14b
-  (TASK.md línea 268); hoy serían dos líneas, "Listo: …" y la de fallo.
+  (TASK.md línea 268); hoy serían dos líneas, "Listo: …" y la de fallo. [resuelto en D89: esas
+  dos líneas, y una por cada paso no intentado]
 
 **D62 · Registro de ejecuciones: la clave, Redis y la variante en memoria** (2026-11-17) ·
 autodecidida por el orquestador; revisable
@@ -2440,7 +2442,8 @@ autodecidida por el orquestador; revisable
   abajo):
   - *Clave:* `execution_key` es el sha256 del JSON canónico (`sort_keys`, `ensure_ascii=False`) de
     `[session_id, tool, normalized]`, como `confirmation_hash` (D47). `normalized` son los valores
-    que cubre el hash de D7.2 y que recibe la tool (D46).
+    que cubre el hash de D7.2 y que recibe la tool (D46). [precisado en D88: los que recibe la
+    tool; en el paso que recibe el número, con ese número, que el hash no cubre]
   - *Protocolo* (`Executions`, `core/executions.py`, sin redis ni ADK): `reserve(key)` devuelve
     `None` si la reservó ahora y, si no, lo guardado (`started`, o `done` con el resultado), sin
     cambiar nada; `complete(key, result)`; `release(key)`. El registro no tiene reglas: las de
@@ -2567,7 +2570,7 @@ el orquestador; revisable
     "sí" (D9, *Limitaciones*).
   - *Plan (14b):* el reporte del fallo parcial, el `ticket_id` en el `message` y la clave del paso
     2 calculada antes de añadirlo; la costura ya corta en el primer paso no hecho y marca cada
-    paso (D59).
+    paso (D59). [resuelto en D88–D91; la clave, después de añadirlo (D88, del autor)]
   - *`MOCK_FAIL` con el modelo real:* solo se probó por `_run` con el modelo falso; `adk web` con
     el registro en memoria no se lanzó.
   - *Tamaño:* `core/turn.py` tiene 532 líneas (tarea 15).
@@ -3244,7 +3247,7 @@ depende** (2026-11-17) · autodecidida por el orquestador; revisable
   - *Un `depends_on` invertido manda (revisión de la tarea 14a, ronda 1, nota 6):* si el modelo
     pone el ticket dependiendo de la notificación, la notificación va primero, nada se infiere y
     la confirmación no lleva la línea de D85; se ve antes del "sí". La 14b decide si el caso E
-    grabado depende de esto.
+    grabado depende de esto. [decidido en D91: sin código; límite para las tareas 17, 19 y 20]
   - *Ciclo declarado (ronda 2, nota 4):* un registro que declare un ciclo de `receives_id` haría
     fallar `plan_order`; `test_declared_links_never_loop` lo impide en `TOOLS`, y el README de
     extensión (19) debe decir que una tool nueva pasa por ese test.
@@ -3256,7 +3259,7 @@ por el orquestador; revisable
   dice recibir el ID, la confirmación suma una línea armada del registro: "{Etiqueta del campo}
   llevará al final el número de {nombre corto de la productora}." (`id_link_line`,
   `core/replies.py`). Sale en toda confirmación de ese plan, mostrada o repetida (tras un turno
-  sin cambios, una corrección o el freno de D86), y nunca en `last_question` (D43), en una
+  sin cambios, una corrección o el freno de D86 [el freno, quitado en D91]), y nunca en `last_question` (D43), en una
   operación sola ni en un paso que depende de otra tool. El hash sigue siendo el de `[{tool,
   normalized}]` por paso (D7.2): la dependencia no cambia entre la confirmación y el "sí" (D83).
   Decisión D de la brief 14a (BB).
@@ -3271,14 +3274,16 @@ por el orquestador; revisable
   meter `depends_on` en el hash (cambia el de todo plan sin proteger nada que pueda cambiar).
 - **Lo prueban:** `test_plan_confirmation_line_and_hash` (también una `send_notification` sola y
   una que depende de la reunión, sin la línea), `test_plan_same_tool_merges_by_step` y
-  `test_case_e_reaches_the_plan_confirmation`.
+  `test_case_e_reaches_the_plan_confirmation`. [desde D91, `test_plan_confirmation_line_and_hash`
+  sin el caso `G2`, que ya ejecuta, y `test_case_e_through_the_node`; la línea aparece si y solo
+  si el número se añade: `test_id_goes_where_the_confirmation_said`, D90]
 - **Pendiente:** añadir el número al final de `message` al ejecutar es la 14b; hasta entonces el
-  freno de D86 impide que la notificación salga sin él.
+  freno de D86 impide que la notificación salga sin él. [resuelto en D90]
 
 **D86 · Un "sí" a un plan de varios pasos no ejecuta nada hasta la 14b** (2026-11-17) ·
 autodecidida por el orquestador; revisable
 
-- **Decisión:** con un registro de dos o más pasos en `awaiting_confirmation`, un "sí" que pasa
+- **Decisión:** [reemplazado en D91: el "sí" ejecuta el plan] con un registro de dos o más pasos en `awaiting_confirmation`, un "sí" que pasa
   todas las comprobaciones de `_confirm` (D45, D7.4, D4 y el hash de D7.2) no llama a
   `_run_confirmed`: responde "Todavía no puedo ejecutar varias operaciones juntas; el plan sigue
   pendiente." (`PLAN_NOT_RUN_YET`) y la confirmación repetida por `_repeat_pending` (D57:
@@ -3302,7 +3307,7 @@ autodecidida por el orquestador; revisable
 - **Pendiente (tarea 14b):** borrar el freno (tres líneas en `_decide`), `PLAN_NOT_RUN_YET` y la
   ruta, y devolver `test_steps_after_one_that_does_not_complete_never_run`, que hoy llama a
   `_run_confirmed` directamente, a un "sí" por `handle_turn` (revisión de la tarea 14a, ronda 1,
-  nota 10). La plantilla no llega a los ejemplos.
+  nota 10). La plantilla no llega a los ejemplos. [resuelto en D91]
 
 **D87 · Tarea 14a: el plan en el turno** (2026-11-17) · autodecidida por el orquestador; revisable
 
@@ -3322,7 +3327,8 @@ autodecidida por el orquestador; revisable
     `missing` es la lista plana de campos paso por paso (ticket y reunión pueden repetir `title`)
     y `last_question`, la pregunta de cada paso incompleto unida por un espacio. D14 no cambia.
   - *Rutas (decisión H):* R3, `other_tool:R3`, `clarification:regla_2` y
-    `clarification:regla_4:R3` conservan su nombre; el freno de D86 es `confirm_plan_provisional`.
+    `clarification:regla_4:R3` conservan su nombre; el freno de D86 es `confirm_plan_provisional`
+    [ruta borrada en D91].
     Se borra `ONE_OPERATION_AT_A_TIME`.
   - *Log (decisión H):* clave nueva `depends=` tras `route=`, solo en el turno que arma un plan:
     primero las ignoradas, en orden de llegada, y después las efectivas, en orden de ejecución
@@ -3378,6 +3384,182 @@ autodecidida por el orquestador; revisable
     (D7.3); nada se ejecuta.
   - *Ejecutar el plan (14b):* añadir el `ticket_id` al final de `message`, la clave de
     idempotencia de cada paso, el reporte de fallo parcial (D8.3), el fijo `E3` y quitar el freno
-    de D86.
+    de D86. [resuelto en D88–D91]
   - *Tarea 15:* (A19), la rama de cuatro candidatas sin test, y la variable local `chosen` de
     `answer_rule` (D81, *Legibilidad*).
+
+**D88 · Precisa D9.1 y D62: la clave del paso que recibe el número cubre los valores que recibe la
+tool** (2026-11-17) · decidida por el autor
+
+- **Decisión:** `execution_key` (D62) se calcula sobre los valores que recibe la tool. En el paso
+  de un plan que recibe el ID de su productora (D8.2, D90), son los confirmados con el número ya
+  añadido al final de `message`, los mismos que `history` guarda como `values` (D59). En los demás
+  pasos y en una operación sola coinciden con los del hash de D7.2, así que nada cambia. Reemplaza
+  lo que fijaba la fila 14b del backlog (nota 13 de `backlog-04.md`, anterior a D62): la clave
+  sobre los valores confirmados, antes de añadir el número. Decisión A de la brief 14b, opción (b).
+- **Lo que ve el usuario:** dos planes en la misma sesión con tickets distintos y la misma
+  notificación (destinatario, mensaje y canal) envían dos notificaciones, cada una con el número de
+  su ticket; la segunda responde "Listo: envié la notificación NTF-….", no "Ya envié…". Tras un
+  fallo del paso 2, repetir la solicitud responde "Ya creé el ticket … con estos mismos datos; no lo
+  repetí." y "Listo: envié la notificación NTF-….": el ticket reutilizado devuelve su ID guardado,
+  así que la notificación lleva los mismos valores y la misma clave, que el fallo liberó (D9.3). Un
+  plan pedido otra vez después de ejecutarse responde las dos líneas "Ya … con estos mismos datos;
+  no lo repetí." sin ejecutar nada (caso H).
+- **Motivo:** D9.1 devuelve el resultado guardado solo ante "una ejecución igual ya hecha", y
+  TASK.md pide evitar duplicados "cuando corresponda a la misma solicitud lógica" (línea 447): una
+  notificación con otro número no es la misma. Con (a), la segunda notificación no se enviaba y su
+  "Ya envié…" era falso. El reintento de D8.3 y D9.3 (líneas 270-272 y 559) funciona igual.
+- **Precisa D9.1 y D62:** D62 dice "`normalized` son los valores que cubre el hash de D7.2 y que
+  recibe la tool"; en el paso receptor esos dos conjuntos difieren y la clave va con los que recibe
+  la tool. El texto de D9.1 y D62 no se edita. El docstring de `execution_key`
+  (`core/executions.py`) lo dice; es el único cambio en ese archivo, sin ninguna línea de código,
+  autorizado por el orquestador tras la revisión de la tarea 14b (ronda 1, should-fix 1).
+- **Descartada:** (a) la clave sobre los valores confirmados, sin el número (la fila 14b): dos
+  tickets distintos con la misma notificación encontraban la clave `done` y la segunda no salía.
+- **Lo prueban:** `test_plan_execution_keys`, `test_another_ticket_gets_its_own_notification`,
+  `test_retry_after_step_two_failed` (fallo y timeout), `test_repeated_plan_after_running` y
+  `test_case_e_through_the_node` (`idem=` con las dos claves).
+- **Pendiente:** *limitación para las tareas 19 y 20 (revisión de la tarea 14b, ronda 1, nota 6, y
+  ronda 2, nota 3):* tras un timeout del paso 2, la clave de la notificación, que lleva el número de
+  ese ticket, queda `started` 24 h (D9.2). Repetir la solicitud reutiliza el ticket y vuelve a
+  responder que no se pudo confirmar, así que la notificación de ese ticket nunca se envía; para
+  enviarla hay que cambiar algún valor (D62, *Un `uncertain` bloquea 24 h*). La 19 lo explica junto
+  a la línea 451 de TASK.md.
+
+**D89 · Pasos no intentados de un plan: una línea y una entrada `skipped`** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** cuando un paso no termina `ran` ni `reused` y corta el plan (D8.1), cada paso
+  posterior, que nunca se intentó, suma tras las líneas de los intentados una línea armada del
+  registro: "No intenté {action_phrase} porque un paso anterior no se completó." (`skipped_line`,
+  `core/replies.py`), sin valores y sin "Listo", la palabra de un resultado (D48). En `history`, la
+  entrada del plan suma tras los pasos intentados uno por cada no intentado, `{tool, values,
+  outcome: "skipped", result: null}` (`SKIPPED`, `core/history.py`), con los valores confirmados:
+  no tiene clave ni recibe ningún ID. `closed_status` no cambia: el `status` sale de los pasos
+  intentados, así que es el `outcome` del que cortó. Decisión B de la brief 14b, opción (a), con la
+  redacción de su revisión (ronda 1, nota 2): "un paso anterior", porque en un plan de tres el paso
+  anterior al tercero tampoco se intentó.
+- **Lo que ve el usuario:** con `MOCK_FAIL=create_ticket`, el "sí" al plan del caso E responde "No
+  pude crear un ticket: la herramienta respondió con un error. Si me lo pides de nuevo, lo intento
+  otra vez." y "No intenté enviar una notificación porque un paso anterior no se completó."; tras
+  un timeout del ticket, la línea de incierto de D61 y la misma línea. Si falla el paso 2 no hay
+  pasos no intentados: "Listo: creé el ticket TCK-…." y la línea de fallo o de incierto de la
+  notificación (D61).
+- **Lo que se guarda:** el plan cerrado conserva todos sus pasos con su `outcome` (`failed` o
+  `uncertain` y después `skipped`).
+- **Motivo:** el usuario recibe el resultado de las dos operaciones (TASK.md líneas 268 y 392),
+  también de la que no corrió, y `history` guarda el estado de ejecución del plan entero (líneas
+  220-224).
+- **Precisa D59 y D61:** D59 dice "Solo se listan los pasos intentados" y D61, "una línea por paso
+  intentado"; ahora los no intentados también se listan, después. `TurnOutcome.results`,
+  `results=` e `idem=` siguen solo con los intentados (D91). El texto de D59 y D61 no se edita.
+- **Descartadas:** (b) solo la línea, sin los no intentados en `history` (el plan cerrado ya no
+  dice qué otro paso tenía); (c) nada, como hasta la 14a (la respuesta a un fallo del ticket no
+  dice que la notificación tampoco salió).
+- **Lo prueban:** `test_steps_after_one_that_does_not_complete_never_run` (fallo y timeout del
+  ticket, ahora por `handle_turn`), `test_plan_of_three` (tras un fallo del ticket, la reunión y la
+  notificación `skipped`, con una línea cada una) y `test_step_two_failure_reports_both`.
+
+**D90 · El paso receptor recibe el número al final del campo declarado, después de validar y del
+hash** (2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** `received_values` (`core/plan.py`) da los valores que recibe la tool de un paso:
+  los confirmados y, si el paso recibe un ID, ese ID al final del campo que declara `receives_id`,
+  en la forma de D8.2: "{valor} ({nombre corto de la productora} {ID})" → "ya se registró la falla
+  (ticket TCK-…)". Un paso recibe el ID solo si su `depends_on` es la `source` de su `receives_id`
+  (`receives_from`), la misma función que decide la línea de D85 en `confirmation_summary`, así que
+  la línea sale si y solo si el número se añade. El ID es el `result_id` del paso productor en este
+  mismo "sí", `ran` o `reused` (un ticket reutilizado pasa su ID guardado); si no lo hay, el plan
+  ya se cortó. Se añade en `_run_confirmed`, después de validar y de comprobar el hash: `pending` y
+  el hash nunca lo llevan (D4 regla 10, D85). No nombra ninguna tool. Decisión C de la brief 14b,
+  opción (a).
+- **Lo que ve el usuario:** la respuesta no cambia; la notificación del caso E recibe "ya se
+  registró la falla (ticket TCK-…)" con el número del ticket recién creado. Una notificación sola,
+  o una que depende de la reunión, recibe su mensaje tal cual.
+- **Lo que se guarda:** en `history`, los `values` del paso receptor llevan el número (D59: lo que
+  recibió la tool), y su clave también (D88).
+- **Motivo:** el caso E pide transferir el `ticket_id` (TASK.md línea 390) y RF-09, ejecutar
+  `send_notification` con el resultado de la primera operación (líneas 265-267). Una sola condición
+  impide que la confirmación prometa un número que no llega, o al revés. Un enlace nuevo entre dos
+  tools sigue siendo un `IdLink` en el registro y ningún código (línea 562; D25).
+- **Precisa D8.2 y D60:** D8.2 fija el contenido; aquí, cuándo y en qué forma. El `ValidationError`
+  del contrato de D60 sigue inalcanzable con el número: `message` es `NonEmptyText` sin longitud
+  máxima, así que un mensaje válido con el sufijo siempre pasa el contrato (nota (A10)). El texto
+  de D8.2 y D60 no se edita.
+- **Descartada:** (b) la frase de D8.2 sin paréntesis (". Ticket: TCK-…"): otra redacción, sin
+  ventaja.
+- **Lo prueban:** `test_received_values` (`tests/test_plan.py`: el enlace real, sin `depends_on`,
+  con otra productora, sin ID, una tool sin enlace, un enlace falso que `core/plan.py` sigue sin
+  cambios, y sin mutar la entrada), `test_id_goes_where_the_confirmation_said` (cuatro planes: la
+  línea de D85 sale si y solo si algún valor recibido difiere del confirmado),
+  `test_yes_runs_the_plan` y `test_plan_of_three` (el número llega a la notificación con la
+  reunión en medio).
+- **Pendiente:** *límite para la tarea 19 (nota (A10)):* si una tool nueva declarara un campo
+  receptor con longitud máxima, un mensaje válido con el sufijo podría fallar el contrato, y
+  cerraría `uncertain` con la clave `started` aunque nada corrió (D60).
+
+**D91 · Tarea 14b: el plan se ejecuta** (2026-11-17) · autodecidida por el orquestador; revisable
+
+- **Decisión:** se borra el freno de D86 (`PLAN_NOT_RUN_YET`, la ruta `confirm_plan_provisional` y
+  sus tres líneas en `_decide`), así que un "sí" a un plan que pasa `_confirm` llega a
+  `_run_confirmed`. Esta recorre los pasos en el orden del plan con su `depends_on`, da a cada uno
+  los valores que recibe (D90) y su clave (D88), corta en el primero que no termina hecho (D8.1) y
+  suma los no intentados (D89). Lo demás no cambia lo que ve el usuario, cuándo se ejecuta una tool
+  ni qué se guarda, así que va en una línea cada uno (regla del autor desde la tarea 07):
+  - *Log y ruta (decisión D):* sin claves nuevas; `results=` e `idem=` listan solo los pasos
+    intentados, en orden (D63), así que un plan cortado tiene menos entradas que `ops=`; la ruta
+    sigue en `confirmed` también con `failed` o `uncertain`, y `depends=` sigue solo en el turno
+    que arma el plan (D87). Descartado: `tool:-:skipped` en `results=` (un paso no reservado no
+    tiene clave para `idem=`).
+  - *Fijo `E3` (decisión E):* "Sí, adelante", `confirm` sin operaciones y con `confirms_tool` nulo,
+    como volvió `G2` del modelo real (D32); `tests/interpretations.py` solo suma líneas.
+  - *`depends_on` invertido (decisión F; D84, *Pendiente*):* sin código. El `depends_on` del modelo
+    manda (D8.4) y el orden se ve en la confirmación antes del "sí". En la fase 0, `E1` llegó con el
+    `depends_on` correcto (D32); si el modelo lo invierte, la notificación va primero y sin el
+    número, y la 17 lo anota en su transcripción.
+  - *`confirms_tool` (D7.4):* puede nombrar cualquier tool del plan, y ese "sí" ahora ejecuta; uno
+    que nombra una tool fuera del plan sigue en `confirm_vetoed`, sin ejecutar nada.
+  - *Docstrings:* `core/replies.py` deja de hablar de plantillas provisionales (no queda ninguna);
+    `IdLink` (`core/registry.py`) dice que el campo recibe el ID al ejecutar el plan;
+    `_run_confirmed` cita la línea 286 de TASK.md para "un sí repetido no encuentra nada" (antes,
+    la 284); `execution_key`, D88.
+  - *Tests reescritos:* `test_yes_to_a_plan_runs_nothing_yet` pasa a `test_yes_runs_the_plan` y
+    `test_case_e_reaches_the_plan_confirmation` a `test_case_e_through_the_node`;
+    `test_yes_to_a_plan_naming_another_tool_is_vetoed` con `G2` da `confirmed`;
+    `test_steps_after_one_that_does_not_complete_never_run` vuelve a `handle_turn` con un "sí" al
+    plan de `E2` y suma el paso `skipped` (nota (A22)); `test_plan_confirmation_line_and_hash`
+    pierde el caso `G2`, porque ese "sí" ya ejecuta (revisión de la tarea 14b, ronda 1, nota 3).
+  - *Tamaño:* `core/turn.py` queda en 550 líneas.
+- **Lo que ve el usuario (casos E y H en un plan):** el caso E termina: el tercer mensaje ("Sí,
+  adelante") crea el ticket, envía la notificación con el número del ticket al final de su mensaje
+  y responde "Listo: creé el ticket TCK-…." y "Listo: envié la notificación NTF-…." (TASK.md líneas
+  388-392). Con `MOCK_FAIL=send_notification`, el ticket queda creado, la respuesta da su línea y
+  la del fallo, y el plan se cierra `failed` (línea 270; D8.3); repetir la solicitud en la misma
+  sesión, sin `MOCK_FAIL`, reutiliza el ticket y envía la notificación (D88). Un plan ya ejecutado y
+  pedido otra vez no ejecuta nada (líneas 443-449).
+- **Motivo:** RF-09, los pasos 5 a 8 de su flujo (TASK.md líneas 265-268) y no ejecutar la segunda
+  operación si falla la primera (línea 270); RF-07, el estado de ejecución, los resultados y las
+  dependencias (líneas 220-224); los objetivos 9 y 10 (líneas 24-25); y las preguntas 6 y 7 de §9
+  (líneas 558 y 559): cada paso va bajo su clave, el primero que no se completa detiene los demás,
+  y repetir la solicitud reutiliza lo hecho y vuelve a intentar solo lo que falló.
+- **Resuelve:** los *Pendiente* de D59, D61, D63 (*Plan (14b)*), D85, D86 y D87 (*Ejecutar el
+  plan*), el de D60 (*`ValidationError` del contrato*, como límite para la 19, D90) y el de D84
+  (*`depends_on` invertido*, decisión F).
+- **Lo prueban:** `test_case_e_through_the_node` (`route=confirmed
+  results=create_ticket:<ID>:ran,send_notification:<NID>:ran idem=<k1>,<k2>`, sin `depends=`, el
+  mismo `op=` en los tres turnos y una entrada `completed`), `test_partial_failure_through_the_node`
+  (`send_notification:-:failed`, el plan `failed` con los pasos `ran` y `failed`),
+  `test_yes_runs_the_plan` (`confirms_tool` nulo, `send_notification` y `create_ticket`),
+  `test_yes_to_a_plan_naming_another_tool_is_vetoed`, `test_step_two_failure_reports_both` (con
+  timeout, `error: "TimeoutError"` en el paso 2 y su clave `started`),
+  `test_retry_after_step_two_failed`, `test_repeated_plan_after_running` y, sin cambios, los de
+  idempotencia de la 11 y los de `tests/test_plan.py` de la 14a. 678 tests.
+- **Pendiente:**
+  - *Limitaciones para las tareas 19 y 20:* el timeout del paso 2 (D88); el `ValidationError`
+    inalcanzable (D90); un `depends_on` invertido manda (D84 y la decisión F); y la explicación
+    escrita de los fallos parciales y los reintentos (TASK.md línea 272) y del estado incierto
+    (línea 451).
+  - *Tarea 17:* la transcripción del caso E depende del `depends_on` que devuelva el modelo
+    (decisión F).
+  - *`MOCK_FAIL` con el modelo real:* el fallo parcial solo se probó con el modelo falso y la
+    variante `simulated` que usa `MOCK_FAIL` (D63, *Pendiente*).
