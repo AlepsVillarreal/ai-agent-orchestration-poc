@@ -188,3 +188,13 @@ async def test_one_log_line_per_turn(caplog):
         without_ambiguity = line.split(" ambiguity=")[0]
         assert "servidor" not in without_ambiguity
         assert "Carlos" not in without_ambiguity
+
+
+# Note (o) of the task 04 review: no retry setting, and the turn node reruns on resume (D1.1).
+def test_no_retry_config_and_rerun_on_resume():
+    root = assistant.agent.root_agent
+    turn_node = root.edges[0][1]
+
+    assert root.retry_config is None
+    assert turn_node.retry_config is None
+    assert turn_node.rerun_on_resume is True

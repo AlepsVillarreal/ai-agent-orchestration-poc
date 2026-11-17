@@ -185,4 +185,64 @@ FIXED: dict[str, FixedTurn] = {
             ],
         },
     ),
+    # Phase 0 of D2 (task 05): the scenarios that are not a case of TASK.md §4.
+    # Informative question (TASK.md line 554: informative vs execution intent).
+    "Q1": FixedTurn(
+        "¿Puedes enviar notificaciones por SMS?", {"act": "question", "operations": []}
+    ),
+    # Weekday scenario of D2: the weekday word arrives as said.
+    "W1": FixedTurn(
+        "Agenda una reunión con Ana el viernes a las 10",
+        {
+            "act": "request_action",
+            "operations": [
+                _op(
+                    "schedule_meeting",
+                    attendees=["Ana"],
+                    date={"weekday": "viernes"},
+                    time={"hour": 10},
+                )
+            ],
+        },
+    ),
+    # Contrast of case C (TASK.md line 117): a notice with no meeting reading.
+    "N1": FixedTurn(
+        "Avísale a Carlos que el servidor ya está disponible",
+        {
+            "act": "request_action",
+            "operations": [
+                _op(
+                    "send_notification",
+                    recipient="Carlos",
+                    message="el servidor ya está disponible",
+                )
+            ],
+        },
+    ),
+    # TASK.md line 113.
+    "T1": FixedTurn(
+        "Necesito reportar que el servidor está caído",
+        {
+            "act": "request_action",
+            "operations": [_op("create_ticket", description="el servidor está caído")],
+        },
+    ),
+    # Answers to the clarification of case C (notification, meeting or both) and probes on it.
+    # The expected value of K1-K3 and S1-S2 is one possible reading: D2 judges by what the code
+    # would do, not by the exact JSON. The probe S3 repeats the message of C1 and is compared
+    # with the expected value of C1.
+    "K1": FixedTurn(
+        "Las dos",
+        {
+            "act": "provide_info",
+            "operations": [_op("send_notification"), _op("schedule_meeting")],
+        },
+    ),
+    "K2": FixedTurn(
+        "Solo avísale",
+        {"act": "provide_info", "operations": [_op("send_notification")]},
+    ),
+    "K3": FixedTurn("No sé, lo que sea", {"act": "other", "operations": []}),
+    "S1": FixedTurn("Sí", {"act": "confirm", "operations": []}),
+    "S2": FixedTurn("No, la reunión no", {"act": "reject", "operations": []}),
 }
