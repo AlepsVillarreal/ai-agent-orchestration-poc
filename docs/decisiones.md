@@ -4,6 +4,12 @@ Registro de las decisiones de arquitectura del PoC, en el orden en que se tomaro
 referencias a `TASK.md` y sus números de línea apuntan al enunciado de la prueba técnica, que
 no forma parte del repositorio.
 
+Una entrada marcada **autodecidida por el orquestador; revisable** es una elección de
+implementación que el orquestador del equipo de agentes tomó sin detener el trabajo, por regla
+del autor (2026-11-16): la opción más chica que cumple TASK.md y las decisiones ya tomadas. El
+autor puede revertirla. Una decisión de diseño nueva que cambie lo que ve el usuario, cuándo se
+ejecuta una tool o qué se guarda se sigue consultando al autor.
+
 **D1 · Control del ciclo de ejecución: opción B** (2026-11-16)
 
 - **Decisión:** el LLM solo interpreta (`LlmAgent` con `output_schema`, sin acceso a las tools
@@ -143,7 +149,7 @@ no forma parte del repositorio.
 - **Pendiente:** D4, anclaje de nombres duro o blando y reglas de fusión (para las listas
   ya hay un marcador que leer: las cubetas `_add` y `_remove` de la enmienda; D4 fija las
   reglas de borde) [resuelto en D4]; D7, confirmación [resuelto en D7], reglas del veto de `confirms_tool` y números no
-  escritos como cifras; D8, regla de `depends_on` [resuelto en D8]. Sin asignar: un posible marcador de
+  escritos como cifras [resuelto en D7.4 y D7.5]; D8, regla de `depends_on` [resuelto en D8]. Sin asignar: un posible marcador de
   "instancia nueva" para "crea otro ticket" con un ticket pendiente (misma causa: la
   palabra "otro" se pierde en el intérprete); no forma parte de esta enmienda.
 
@@ -627,7 +633,7 @@ no forma parte del repositorio.
   ejecuta los valores mostrados; el código no puede ver el "pero" (D4).
 - **Pendiente:** las reglas del veto de `confirms_tool` con una operación pendiente (D2 solo
   fija "nulo no bloquea") y los números no escritos como cifras (D2). Ninguna opción
-  aprobada los cubre.
+  aprobada los cubre. [resuelto en D7.4 y D7.5]
 
 **D8 · Plan de varias tools** (2026-11-16)
 
@@ -700,7 +706,7 @@ no forma parte del repositorio.
   "sí".
 - **Pendiente:** qué deja la clave cuando el mock responde con `success=false`. Si queda
   como `done`, repetir la solicitud devuelve el fallo guardado y el reintento de D8.3 no
-  vuelve a ejecutar el paso que falló.
+  vuelve a ejecutar el paso que falló. [resuelto en D9.3]
 
 **D10 · Nombres de tools en el esquema del intérprete: cadena libre** (2026-11-16)
 
@@ -747,4 +753,69 @@ no forma parte del repositorio.
 - **Descartadas:** humo y corrida completa, las dos obligatorias (D2 tal como está escrito);
   solo el humo, sin corrida completa en ningún caso.
 - **Pendiente:** el umbral de fallos de forma de D2 que activa el híbrido (≥ 3/207) no tiene
-  un equivalente fijado para las 23 llamadas del humo.
+  un equivalente fijado para las 23 llamadas del humo. [resuelto en F0.1]
+
+**D9.3 · Enmienda a D9: un resultado fallido libera la clave** (2026-11-16)
+
+- **Decisión:** si el mock responde `success=false`, el fallo se informa al usuario, se anota
+  en el log y la clave de idempotencia se borra. Repetir la solicitud la ejecuta de nuevo. Un
+  timeout no cambia: `started` sin `done` se cierra como `uncertain` (D9.2).
+- **Motivo:** así funciona el reintento de D8.3 sin un mecanismo nuevo. Si falló el paso 1,
+  repetir la solicitud crea el ticket; si falló el paso 2, el paso 1 encuentra `done` y
+  devuelve el ticket guardado, y la notificación corre de nuevo (TASK.md líneas 270-272 y
+  559).
+- **Descartada:** guardar el fallo como `done`; repetir la solicitud devolvería el fallo
+  guardado durante 24 h y el paso que falló no volvería a ejecutarse.
+
+**D7.4 · Enmienda a D7: veto de `confirms_tool`** (2026-11-16)
+
+- **Decisión:** un `confirm` cuyo `confirms_tool` nombra una tool distinta de la pendiente no
+  ejecuta ni cambia nada, y vuelve a mostrar la confirmación pendiente. En un plan,
+  `confirms_tool` puede nombrar cualquier tool del plan. Nulo no bloquea (D2).
+- **Motivo:** el "sí" vale solo para la operación pendiente identificada y nunca autoriza otra
+  tool (TASK.md líneas 282-284). Repetir la confirmación muestra qué está pendiente sin perder
+  lo recopilado (línea 145).
+
+**D7.5 · Enmienda a D2 y D7: números no escritos como cifras** (2026-11-16)
+
+- **Decisión:** sin regla extra. El modelo convierte las palabras a número ("media hora" →
+  30), como ya le asigna D2, y la confirmación (D7.1, D7.2) muestra el valor normalizado antes
+  del "sí".
+- **Motivo:** una conversión equivocada cuesta una corrección, nunca una ejecución
+  equivocada: el usuario ve el número antes de autorizar (TASK.md líneas 168 y 276-284).
+- **Limitación para el README:** el código no comprueba que un número dicho con palabras se
+  convirtió bien; "media hora" que llega como 60 es válida y solo la confirmación lo deja ver.
+
+**F0.1 · Enmienda a F0: umbral de la prueba de humo** (2026-11-16)
+
+- **Decisión:** con 0/23 fallos de forma se mantiene la opción B. Con uno o más, el
+  orquestador se detiene y muestra los casos al autor, que elige entre el híbrido de D1, un
+  ajuste del esquema o seguir. No se fija un número de antemano.
+- **Motivo:** el umbral de D2 (≥ 3/207) no tiene traducción directa a 23 llamadas; en vez de
+  fijar una proporción, el autor revisa cada fallo de forma antes de activar o descartar el
+  repliegue de D1.
+
+**D12 · Contratos: un argumento fuera del contrato es un error** (2026-11-16) · autodecidida
+por el orquestador; revisable
+
+- **Decisión:** los tres contratos Pydantic (`core/contracts.py`) heredan de una base con
+  `extra="forbid"`. Cada mock valida sus argumentos contra el contrato antes de producir un
+  resultado, así que una clave que el contrato no declara lanza `ValidationError` y nada se
+  ejecuta. Lo prueba `test_contract_rejects_unknown_fields`.
+- **Motivo:** el contrato es la última barrera antes del mock (TASK.md líneas 149 y
+  233-243). El filtro por contrato de D2 ya quita las claves desconocidas y los valores del
+  código viven fuera de `args` (D4 regla 10), así que una clave de más indica un error del
+  código: debe fallar, no ignorarse en silencio.
+- **Descartada:** el valor por defecto de Pydantic, que ignora las claves desconocidas.
+
+**D13 · Contratos: `duration_minutes` como entero estricto** (2026-11-16) · autodecidida por
+el orquestador; revisable
+
+- **Decisión:** en `ScheduleMeetingArgs`, `duration_minutes` es `StrictInt`: el contrato
+  rechaza `"30"`, `True` y `30.0` en vez de convertirlos. El rango 1–480 sigue siendo del
+  validador (D5.3), así que el contrato acepta `0` y negativos.
+- **Motivo:** el validador de D5.3 entrega un entero; una conversión implícita ("30" → 30) en
+  la última barrera ocultaría un error del validador (TASK.md líneas 73 y 155).
+- **Descartada:** `int` de Pydantic, que convierte `"30"` en 30.
+- **Pendiente:** ningún test lo cubre: con `int` los 46 tests siguen pasando (revisión de la
+  tarea 01). Falta un caso `"30"` en el test de formas inválidas de los contratos.

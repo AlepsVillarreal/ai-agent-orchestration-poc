@@ -46,5 +46,3 @@ Para detener Redis: `docker compose down` (los datos se conservan en el volumen 
 ```bash
 uv run pytest
 ```
-
-> Mientras no exista la carpeta `tests/`, pytest terminará con *"no tests ran"* (código de salida 5). Es esperado en esta etapa.
