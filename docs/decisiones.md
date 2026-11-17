@@ -1457,7 +1457,7 @@ orquestador; revisable
   prueba de humo, `G2` ("Sí, hazlo") volvió sin operaciones (D32).
 - **Descartada:** no anclar un valor igual al guardado (sin cambio ni rechazo; el "sí" contaría).
 - **Pendiente:** ningún test lo fija; las revisiones de la tarea 07 lo corrieron a mano. Las
-  tareas 09b y 10a (caso G) lo tienen en cuenta. Vale mientras `last_question` no lleve valores
+  tareas 09b y 10a (caso G) lo tienen en cuenta. [test en D47] Vale mientras `last_question` no lleve valores
   (D2, D14): si la 09b guarda ahí la confirmación de D7.1 con los valores normalizados, el
   modelo los vería y podría repetirlos. [la confirmación nace en la 10a y su pregunta guardada
   no lleva valores; ver D43]
@@ -1520,7 +1520,7 @@ D10** (2026-11-17) · autodecidida por el orquestador; revisable
   turno mixto con una tool fuera del catálogo, y un registro que no está en `collecting`) y a
   `READY_NOT_AVAILABLE_YET` con un registro completo. Ningún test fija esa parte (revisión de la
   tarea 08, ronda 2, nota 1). Las tareas 10a y 12, que reemplazan esas plantillas, deben
-  decidirla y probarla en vez de heredarla.
+  decidirla y probarla en vez de heredarla. [la parte de la 10a, resuelta en D45 y D47]
 - **Redacción:** "Parte de tu solicitud" es inexacta cuando la única operación del turno era la
   descartada; se acepta por ahora.
 - **Descartada:** dejar la pregunta pendiente sola, sin aviso (el descarte silencioso que D10
@@ -1544,7 +1544,7 @@ orquestador; revisable
     `changes=` (`campo:tipo:anterior->nuevo`, valores en JSON) y `rejected=` (`clave:nombre`),
     aun vacíos; esas dos claves llevan valores del usuario y la línea ya no se parte por espacios.
   - *Solo `collecting`:* *Misma tool* exige un registro en `collecting`; los demás estados siguen
-    con la plantilla provisional (10a y 13).
+    con la plantilla provisional (10a y 13). [`awaiting_confirmation` resuelto en D47]
   - *Sin cambios:* un turno *Misma tool* que no cambia nada devuelve un delta vacío; uno con solo
     una nota o un rechazo tampoco cambia el estado y muestra esas líneas antes de la pregunta.
   - *Varios pasos:* `missing` y las preguntas de cada paso se concatenan; la 14a decide esa
@@ -1631,6 +1631,7 @@ autodecidida por el orquestador; revisable
     completo con una de ellas deja `last_question` nulo y cierra con la plantilla provisional
     "Tengo los datos; todavía no puedo validar fechas ni horas en esta versión.".
   - *Completo y válido:* `last_question` nulo y la plantilla de D19; nada se ejecuta (D7.1).
+    [reemplazado en D47: `awaiting_confirmation`]
   - *Log:* todo turno entendido suma `invalid=campo:causa`, sin valores ni tool, antes de
     `changes=`, aun vacío. Sin la tool, dos pasos con un campo del mismo nombre no se
     distinguen; lo decide la 14a.
@@ -1667,9 +1668,142 @@ autodecidida por el orquestador; revisable
   `test_invalid_word_through_the_node` y `test_complete_meeting_does_not_reach_confirmation`.
 - **Pendiente:** un "sí" con faltantes o inválidos responde la plantilla provisional sin tocar
   el estado, no la pregunta que pide D7.1; la 10a lo cambia y repite también las líneas de
-  inválido (revisión de la tarea 09a, ronda 2, nota 1). La confirmación y el hash de D7.2 deben
-  salir de `validate(...).normalized`, nunca de `args`, que conserva " Carlos " (nota 3). El
+  inválido (revisión de la tarea 09a, ronda 2, nota 1) [resuelto en D47]. La confirmación y el
+  hash de D7.2 deben salir de `validate(...).normalized`, nunca de `args`, que conserva
+  " Carlos " (nota 3) [resuelto en D46 y D47]. El
   caso D sigue sin cumplirse hasta la 09b ("40 de noviembre a las 25:90" se anota y no se
   reporta; TASK.md líneas 159, 163 y 365-371), que además quita el `validate` repetido de
   `_closing_line`. `test_complete_meeting_does_not_reach_confirmation` solo puede fallar desde
   la 10a: hoy nada crea `awaiting_confirmation` (ronda 1, nota 3).
+
+**D45 · Un "sí" que trae otra tool, o del que el filtro descartó algo, no ejecuta** (2026-11-17)
+· decidida por el autor
+
+- **Decisión:** con un registro pendiente (`collecting` o `awaiting_confirmation`), un `confirm`
+  que trae una operación de una tool que no está pendiente, con cualquier `certainty`, o del que
+  el filtro del registro descartó alguna operación (D10), no ejecuta ni cambia nada: repite la
+  confirmación o la pregunta pendiente, con la línea fija de D10 delante si el filtro descartó
+  algo. Es el mismo trato que el veto de D7.4, y se evalúa antes que él y antes de la fusión.
+  Respuesta del autor a la brief 10a, opción (a).
+- **Motivo:** un "sí" nunca autoriza otra tool (TASK.md líneas 282-284), y un "sí" que mezcla
+  otra solicitud ya no responde solo a lo que se mostró: el mismo motivo por el que un turno
+  con cambios no ejecuta (D4, *Lo que D4 exige a D7*). Cuesta un turno, nunca una ejecución.
+- **Lo que ve el usuario:** con una notificación en confirmación, "Sí, y agenda una reunión con
+  Juan" repite la confirmación y "Sí, y pide una pizza" la repite tras la línea de D10. Nada
+  corre y puede pedir lo otro aparte.
+- **Precisa D3 y D7:** D3 (*Compuerta de entrada*, paso 3, *Resto*) manda `confirm` a D7 sin
+  mirar otras tools, y D7 solo habla de la tool pendiente. Tampoco es *Otra tool* (D3.1), que
+  no lista `confirm`. El texto de D3 y D7 no se edita.
+- **Descartadas:** ejecutar lo pendiente e ignorar lo demás con una línea fija ("No inicié lo
+  otro; pídemelo aparte."); tratarlo como *Otra tool* (D3.1: archiva lo pendiente e inicia lo
+  nuevo, y pierde una operación que el usuario acaba de confirmar).
+- **Lo prueba:** `test_yes_with_another_tool_never_runs` (una tool del catálogo, una fuera de
+  él y un registro en `collecting`).
+
+**D46 · Costura de ejecución: el núcleo llama a la tool desde un solo punto** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** `_run_confirmed` (`core/turn.py`) es el único sitio del código que llama a una
+  tool: por cada paso, `TOOLS[tool].execute(normalized)` con los valores normalizados que cubre
+  el hash de D7.2, y el mock los valida contra su contrato (D12). Devuelve
+  `state_delta={"pending": None}`, `route="confirmed"` y, como respuesta, el `message` de cada
+  resultado. El nodo del turno no llama a ninguna tool y sigue haciendo una sola llamada al
+  núcleo. El registro de ejecuciones de D9 llega en la tarea 11 como parámetro `executions` de
+  `handle_turn` y de `build_root_agent(interpreter, executions)`: un almacén sin reglas que el
+  núcleo consulta antes y después de la llamada (reserva con `SET NX`, `done`, liberación ante
+  `success=false`); el nodo solo lo pasa. Opción A de la brief 10a.
+- **Lo que ve el usuario:** nada que D7.1 no decidiera ya: desde la 10a el mock corre tras un
+  "sí" válido y `pending` queda vacío, así que un "sí" reenviado responde "No hay ninguna
+  operación pendiente." (TASK.md línea 284) y no ejecuta otra vez.
+- **Motivo:** D1.1 pide una sola llamada al núcleo por turno y un nodo sin lógica (*Frontera*).
+  Si el nodo ejecutara, tendría que recorrer el plan, cortar en el primer fallo y pasar el
+  `ticket_id` (D8.2, D8.3): lógica de negocio en el adaptador. Así D9.2 y D9.3 quedan en Python
+  puro y se prueban sin Redis (TASK.md líneas 270, 286, 558 y 568-570).
+- **Costo aceptado:** el núcleo es síncrono, así que la variante Redis de la 11 usará el cliente
+  síncrono de redis-py dentro de un nodo async (milisegundos, en una CLI de un usuario); la
+  brief 11 lo confirma.
+- **Descartadas:** que el núcleo devuelva una orden (`to_execute`) y el nodo llame al mock y
+  vuelva a llamar al núcleo con el resultado; esconder la llamada tras una bandera hasta la 10b
+  (una plantilla provisional más que la 10b tiraría); agregar `executions` ya en la 10a (nada
+  lo usaría hasta la 11).
+- **Lo prueban:** `test_yes_runs_the_pending_operation_once`, `test_case_g_through_the_node`,
+  `test_confirmed_operation_is_gone_after_reload` y `test_no_turn_executes_a_tool`, sin cambios;
+  `grep -rn "\.execute(" core assistant` da solo `_run_confirmed`.
+- **Pendiente:** hasta la 11 no hay idempotencia: una solicitud idéntica repetida después de
+  ejecutarse vuelve a pedir confirmación y, con otro "sí", ejecuta de nuevo (D9.1; TASK.md
+  líneas 443-449). `_run_confirmed` no corta en un fallo, vacía `pending` sin mirar `success` y
+  no captura una excepción de la tool; las tareas 11 y 14b lo cambian antes de un plan de dos
+  pasos (TASK.md línea 270; revisión de la tarea 10a, ronda 2, nota 5). Sin `history` (D6) ni
+  respuesta propia del resultado (línea 246): tarea 10b.
+
+**D47 · Tarea 10a: confirmación y "sí" en el turno** (2026-11-17) · autodecidida por el
+orquestador; revisable
+
+- **Decisión:** `core/turn.py` crea `awaiting_confirmation` y la rama `confirm`;
+  `core/confirmation.py` (`shown_values`, `confirmation_hash`) calcula lo que se muestra y se
+  ata; `core/replies.py` (`confirmation_summary`, `confirmation_question`) lo escribe. Ninguno
+  de estos detalles cambia cuándo se ejecuta una tool más allá de D7, D45 y D46, así que van en
+  una línea cada uno (regla del autor desde la tarea 07):
+  - *Hash distinto: se revalida (precisa D7.2):* los pasos se evalúan otra vez, como tras un
+    cambio: siguen completos y válidos → la confirmación con los valores actuales y el hash
+    nuevo; uno dejó de serlo → `collecting` sin `confirmation_hash`, con sus líneas de inválido
+    y su pregunta, y nada corre. Sin revalidar, la confirmación omitía el campo inválido y el
+    "sí" siguiente llegaba al contrato del mock incompleto (revisión de la tarea 10a, ronda 1,
+    should-fix 1; TASK.md líneas 239-241). La brief 10a pedía solo volver a mostrar.
+  - *Orden de un `confirm` con algo pendiente:* D45; veto de D7.4; fusión (un cambio, un nombre
+    rechazado o una nota nunca ejecutan, D4 y D38); registro en `collecting` → las líneas de
+    inválido y la pregunta, sin tocar el estado (D7.1); hash; `_run_confirmed` (D46).
+  - *`operation_id`:* `uuid4().hex`, nace en R2 en todo registro y se conserva en cada fusión;
+    lo lee el log como `op=`, después de `session=` y también en un turno con fallo del modelo,
+    y desde la 10b `history`. No se compara al llegar el "sí": lo ata el registro único (D1) y
+    lo protege el hash.
+  - *`confirmation_hash`:* sha256 del JSON canónico (`sort_keys`, `ensure_ascii=False`) de
+    `[{tool, normalized}]` por paso; se guarda en el registro y `pending_summary` no lo muestra
+    (D14). Los normalizados se recalculan, nunca se guardan (D44).
+  - *Vuelta a `collecting`:* una corrección que deja un paso incompleto o inválido borra
+    `confirmation_hash` (D7.1).
+  - *Misma tool en confirmación:* la rama acepta también `awaiting_confirmation`; una corrección
+    vuelve a mostrar la confirmación con hash nuevo y un mensaje sin cambios la repite con el
+    estado intacto (D9 *Caso H*, D40).
+  - *Valores dos veces:* una solicitud que llega completa muestra los `fill` de D39 (palabras
+    del usuario) y después el resumen normalizado, así que se ve la conversión "Alta" → "alta".
+  - *Resumen:* "Voy a {acción} con estos datos:" y una línea "- {Etiqueta}: {valor}" por campo,
+    en el orden del registro; una `word` por su `value_labels` ("correo", nunca `email`).
+  - *Pregunta guardada:* "¿Confirmas que quieres {acciones}? Responde sí o no.", sin valores
+    recopilados ni permitidos (D43, D38).
+  - *Hash distinto y válido:* la confirmación vuelve a mostrarse sin una línea que diga por qué.
+  - *Un "sí" que repite un valor guardado* ("Sí, por correo"; "Sí, envíalo a Carlos" con el
+    nombre escrito) no es un cambio (D4 regla 5) y cuenta como "sí".
+  - *Tras ejecutar:* la respuesta es el `message` del mock, con los valores canónicos ("high",
+    "email"), hasta la 10b.
+  - *Fase 0:* `test_the_23_scenarios_of_d2` compara los registros sin `operation_id`, que es
+    aleatorio; el resumen no lo muestra, así que los prompts con que se midió D32 no cambian.
+  - *Plantillas:* se borra `READY_NOT_AVAILABLE_YET` (D19); un registro `collecting` sin
+    pregunta solo existe con una fecha u hora sin regla (`DATE_TIME_NOT_CHECKED_YET`, hasta la
+    09b).
+- **Motivo:** RF-08 y RF-10 piden ejecutar solo con argumentos completos, validados y
+  autorizados, y atar el "sí" a la operación pendiente identificada (TASK.md líneas 233-243 y
+  276-286); el caso G confirma antes de ejecutar sin volver a pedir lo dado (líneas 420-438), y
+  el B ejecuta solo con todo completo (línea 335).
+- **Precisa D19 y D44:** la plantilla de D19 desaparece: una solicitud completa y válida pasa a
+  `awaiting_confirmation`. Su texto no se edita.
+- **Precisa D41:** con algo pendiente, la línea de D10 precede también a la confirmación
+  mostrada o repetida. Las plantillas provisionales que quedan (`reject`, `cancel`, `question`,
+  `other`, *Otra tool*) y la redacción "Parte de tu solicitud" siguen en la 12.
+- **Lo prueban:** `test_complete_request_awaits_confirmation`,
+  `test_case_b_reaches_confirmation`, `test_yes_runs_the_pending_operation_once`,
+  `test_yes_while_collecting_repeats_the_question`, `test_yes_with_a_change_never_runs`,
+  `test_yes_with_a_resent_name_is_rejected` (D38), `test_confirms_tool_veto` (D7.4),
+  `test_hash_mismatch_asks_again`,
+  `test_hash_mismatch_with_an_invalid_value_goes_back_to_collecting`,
+  `test_repeated_request_while_awaiting`, `test_correction_while_awaiting`,
+  `test_unknown_tool_while_awaiting_adds_the_d10_line`, `test_yes_with_a_note_never_counts`,
+  `test_yes_repeating_a_stored_value_counts`, `test_case_g_through_the_node` (con `op=` en el
+  log) y `test_case_b_through_the_node` (termina con un "sí" que ejecuta `create_ticket`).
+- **Pendiente:** "una nota nunca ejecuta" se prueba sobre una reunión en `collecting`; el caso
+  que importa (una reunión en confirmación y "sí, y quita a Ana") existe desde la 09b y va como
+  criterio de su brief (revisión de la tarea 10a, ronda 2, nota 2). La 09b decide si un hash
+  distinto con valores válidos ("mañana" que cambió de día) lleva una línea que lo explique
+  (nota 4). En el "sí" que ejecuta, cada paso se valida tres veces (nota 3). `core/turn.py`
+  tiene 406 líneas (umbral de la brief: ~350), y `record_tools` y `without_id` están repetidos
+  en los tests (nota 6). `reject` y `cancel` (D7.3) son la 12.
