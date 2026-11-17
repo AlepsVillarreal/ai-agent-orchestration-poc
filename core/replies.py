@@ -5,6 +5,7 @@ Tool-specific words (action phrases, field labels) come from the registry, never
 build; they never start or run anything.
 """
 
+from collections.abc import Sequence
 from typing import Any
 
 from core.history import FAILED, RAN, REUSED
@@ -25,8 +26,9 @@ NO_PENDING_OPERATION = "No hay ninguna operación pendiente."
 # started, so it is not the discard line of D66 ("No voy a…").
 NO_ACTION_STARTED = "No inicié ninguna acción. Dime qué necesitas cuando quieras."
 
-# Provisional: R3, and a clarification resolved to two or more tools (task 14a replaces it).
-ONE_OPERATION_AT_A_TIME = "Por ahora puedo atender una operación a la vez; ¿cuál necesitas primero?"
+# Provisional (decision F of brief 14a; task 14b removes it): a "yes" to a plan of two or more
+# steps runs nothing yet, because passing the ticket's number to the next step is task 14b.
+PLAN_NOT_RUN_YET = "Todavía no puedo ejecutar varias operaciones juntas; el plan sigue pendiente."
 
 # D1.1 *Fallos* and D2: the interpreter's output was broken, outside the schema or empty.
 # Nothing in the state changed (the turn node returns no state delta).
@@ -141,15 +143,17 @@ def invalid_line(spec: FieldSpec, cause: Cause) -> str:
     return f"No pude leer {spec.label}."
 
 
-def confirmation_summary(shown: list[dict[str, Any]]) -> str:
+def confirmation_summary(shown: list[dict[str, Any]], depends_on: Sequence[str | None] = ()) -> str:
     """D7.1: the normalized values of each step, the ones the hash binds (D7.2).
 
     One header per step with the action phrase, then one line per field with its label, in
     registry order. A `word` value is shown by its Spanish label ("alta", "correo"), never by the
-    canonical value the tool receives ("high", "email").
+    canonical value the tool receives ("high", "email"). `depends_on` gives each step's
+    dependency, in step order (none for a single operation): a step that depends on the tool its
+    registry says it receives an ID from gets `id_link_line` after its values (D8.2).
     """
     lines = []
-    for step in shown:
+    for index, step in enumerate(shown):
         tool = TOOLS[step["tool"]]
         values = step["normalized"]
         lines.append(f"Voy a {tool.action_phrase} con estos datos:")
@@ -158,7 +162,21 @@ def confirmation_summary(shown: list[dict[str, Any]]) -> str:
             for spec in tool.fields
             if spec.name in values
         ]
+        link = tool.receives_id
+        if link is not None and index < len(depends_on) and depends_on[index] == link.source:
+            lines.append(id_link_line(tool))
     return "\n".join(lines)
+
+
+def id_link_line(tool: ToolSpec) -> str:
+    """D8.2, decision D of brief 14a: which field of a step gets the producer's ID at its end.
+
+    Written from the registry ("El mensaje llevará al final el número de ticket."), so no tool
+    is named here (TASK.md line 562). Shown in the confirmation only, never in `last_question`.
+    """
+    link = tool.receives_id
+    label = next(spec.label for spec in tool.fields if spec.name == link.field)
+    return f"{_capitalized(label)} llevará al final el número de {TOOLS[link.source].short_name}."
 
 
 def confirmation_question(tools: list[ToolSpec]) -> str:

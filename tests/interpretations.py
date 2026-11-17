@@ -119,6 +119,24 @@ FIXED: dict[str, FixedTurn] = {
             ],
         },
     ),
+    # Case E, second message (own wording; amendment F4, task 14a): what the plan of `E1` asks
+    # for, the ticket's title and description and the notice's message. No person's name, so
+    # nothing to anchor.
+    "E2": FixedTurn(
+        "El título es Servidor caído, la descripción es que el servidor de producción no "
+        "responde, y el mensaje: ya se registró la falla",
+        {
+            "act": "provide_info",
+            "operations": [
+                _op(
+                    "create_ticket",
+                    title="Servidor caído",
+                    description="el servidor de producción no responde",
+                ),
+                _op("send_notification", message="ya se registró la falla"),
+            ],
+        },
+    ),
     # Case F, TASK.md lines 399 and 407.
     "F1": FixedTurn(
         "Agenda una reunión con Juan",

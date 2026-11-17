@@ -93,6 +93,7 @@ def log_turn(
     invalid: Sequence[dict] = (),
     operation_id: str | None = None,
     results: Sequence[StepRun] = (),
+    depends: Sequence[str] | None = None,
 ) -> None:
     """One `key=value` line per turn. `route` comes from the core, never from the reply text.
 
@@ -103,6 +104,10 @@ def log_turn(
     uncertain) and `idem=` (the idempotency key of each step, in the same order: a hash, never a
     user value; D9.1), then `tool_error=` with the exception's type name when a tool raised.
     The ID comes from the tool, not from the user.
+    A turn that builds a plan adds, after `route=`, `depends=` with one entry per dependency of
+    the plan, effective or ignored (`receiver<producer`, `receiver<producer:inferred`,
+    `step<named:ignored`; tool names only, D8.1, D8.4), empty when the plan has none; any other
+    turn has no `depends=`.
     `ops` lists the operations as the interpreter returned them, before the registry filter, so
     an unknown tool dropped by D10 stays visible. The keys before `changes=` carry no argument
     value and no message text. A turn the interpreter understood adds `invalid=`
@@ -120,6 +125,8 @@ def log_turn(
     if operation_id:
         parts.append(f"op={operation_id}")
     parts += [f"act={act}", f"ops={ops}", f"route={route}"]
+    if depends is not None:
+        parts.append("depends=" + ",".join(depends))
     if results:
         parts.append(
             "results=" + ",".join(f"{r.tool}:{r.result_id or '-'}:{r.outcome}" for r in results)
@@ -195,6 +202,7 @@ def build_root_agent(interpreter: LlmAgent, executions: Executions | None = None
             rejected=outcome.rejected,
             invalid=outcome.invalid,
             results=outcome.results,
+            depends=outcome.depends,
             # The record the turn wrote, or the pending one when it wrote none or emptied it.
             operation_id=_operation_id(outcome.state_delta.get("pending") or pending),
         )

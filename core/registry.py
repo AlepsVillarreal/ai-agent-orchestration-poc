@@ -66,6 +66,20 @@ class FieldSpec:
 
 
 @dataclass(frozen=True)
+class IdLink:
+    """A tool receives the result ID of another tool of the same plan (D8.2, D25).
+
+    Declared on the receiving tool. `source` names the producing tool, whose ID is the value of
+    its `result_id_field`; `field` is the receiver's own field that gets the ID at its end (task
+    14b adds it). The plan reads this to infer a dependency the model did not report (D8.4), so
+    no tool name is written in the core (TASK.md line 562).
+    """
+
+    source: str  # the tool that produces the ID: "create_ticket"
+    field: str  # this tool's field that receives it: "message"
+
+
+@dataclass(frozen=True)
 class ToolSpec:
     name: str
     description: str  # English, read by the interpreter
@@ -76,6 +90,7 @@ class ToolSpec:
     contract: type[BaseModel]
     result_id_field: str  # "ticket_id", ...
     execute: Callable[[dict[str, Any]], dict[str, Any]]  # the mock
+    receives_id: IdLink | None = None  # the ID this tool gets from another step (D8.2, D25)
 
 
 # Field descriptions follow D2: the model transcribes what the user said; code validates.
@@ -212,6 +227,8 @@ TOOLS: dict[str, ToolSpec] = {
         contract=SendNotificationArgs,
         result_id_field="notification_id",
         execute=mock_tools.send_notification,
+        # D8.2: after `create_ticket` in a plan, the ticket's ID goes at the end of `message`.
+        receives_id=IdLink(source="create_ticket", field="message"),
     ),
 }
 

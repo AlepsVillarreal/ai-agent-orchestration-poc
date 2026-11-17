@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from core import mock_tools, replies
+from core import turn as core_turn
 from core.confirmation import confirmation_hash, shown_values
 from core.executions import InMemoryExecutions, execution_key, settled
 from core.instruction import pending_summary
@@ -164,9 +165,10 @@ def test_nothing_pending_acts():
             assert outcome.state_delta == {}
 
 
-# 9. Task 13: R4 and R5 store a clarification (no `steps`, so no flow starts); R3 still creates
-# nothing until task 14a. The clarification itself is in test_clarification.py.
-def test_r3_r4_r5_do_not_start_anything_yet():
+# 9. Task 13: R4 and R5 store a clarification (no `steps`, so no flow starts). Task 14a (note
+# (A20) part (a)): R3 now stores a plan, so the test is renamed. The plan is in the brief 14a
+# tests below; the clarification in test_clarification.py.
+def test_r3_stores_a_plan_and_r4_r5_a_clarification():
     only_plausible = interpretation(
         "request_action", op("schedule_meeting", "plausible", attendees=["Carlos"])
     )
@@ -178,11 +180,15 @@ def test_r3_r4_r5_do_not_start_anything_yet():
     for turn, message, route in turns:
         outcome = handle_turn(None, turn, TurnInput(message, NOW, SESSION))
         assert outcome.route == route
-        if route == "R3":
-            assert outcome.state_delta == {}
-            continue
         assert list(outcome.state_delta) == ["pending"]
         record = outcome.state_delta["pending"]
+        if route == "R3":
+            assert record["status"] == "collecting"
+            assert [step["tool"] for step in record["steps"]] == [
+                "create_ticket",
+                "send_notification",
+            ]
+            continue
         assert record["status"] == "awaiting_clarification"
         assert "steps" not in record
 
@@ -1213,13 +1219,14 @@ def test_only_a_closing_writes_history():
             continue
         new = outcome.state_delta["history"]
         assert new[:-1] == history and new[-1]["status"] == status, outcome.route
-        # Only R3 creates nothing after a change of intention (task 14a).
+        # Since task 14a R3 writes a plan too: only a discard leaves nothing pending.
         assert (outcome.state_delta["pending"] is None) == route.endswith(
-            ("cancelled", "regla_1", ":R3")
+            ("cancelled", "regla_1")
         ), route
     assert {o.route for o in outcomes} >= {
         "cancelled",
         "other_tool:R2",
+        "other_tool:R3",
         "other_tool:R4",
         "clarification:regla_1",
         "clarification:regla_4:R2",
@@ -1903,14 +1910,17 @@ def two_step_record() -> dict:
 
 
 # 11 (note (bbb) at the seam; TASK.md line 270, D8.1): a step that does not end done stops the
-# steps after it.
+# steps after it. Since task 14a a "yes" to a plan stops before the seam (decision F) until task
+# 14b, so the seam is called directly; through `handle_turn` see
+# test_yes_to_a_plan_runs_nothing_yet.
 @pytest.mark.parametrize("mode", ["failure", "timeout"])
 def test_steps_after_one_that_does_not_complete_never_run(monkeypatch, mode):
     tickets = counting(monkeypatch, "create_ticket", failure_mock("create_ticket", mode))
     notices = counting(monkeypatch, "send_notification")
     executions = InMemoryExecutions()
+    turn_input = TurnInput(FIXED["G2"].message, NOW, SESSION)
 
-    outcome = turn_in(two_step_record(), "G2", executions)
+    outcome = core_turn._run_confirmed(two_step_record(), turn_input, (), executions)
 
     assert outcome.route == "confirmed"
     assert len(tickets) == 1 and notices == []
@@ -2052,57 +2062,72 @@ def test_other_tool_while_awaiting_confirmation_runs_only_the_new_tool(monkeypat
     assert yes.state_delta["history"][-1]["operation_id"] == notification["operation_id"]
 
 
-# 3 (D3.1): a "no"/"cancel" that brings another tool is a change of intention, never `cancelled`
+# 3 (D3.1): a "no"/"cancel" that brings another tool is a change of intention, never `cancelled`.
+# Task 14a: the `other_tool:R3` case now leaves a plan with the turn's operations in `pending`.
+# Round 2 (the author's amendment to D3.1, review 14a-1 finding 1): with `reject`/`cancel`, the
+# operations of the pending tool are dropped before the table, so only the new ticket starts.
 _NEW_TICKET = op("create_ticket", description="revisar el servidor")
 _NEW_MEETING = op("schedule_meeting", attendees=["Juan"])
+_TICKET_STEP = {"tool": "create_ticket", "args": _NEW_TICKET["args"]}
 
 
 @pytest.mark.parametrize(
-    ("first", "turn", "message", "route", "reply_end"),
+    ("first", "turn", "message", "route", "steps"),
     [
         (
             "F1",
             interpretation("reject", _NEW_TICKET),
             "No, mejor crea un ticket para revisar el servidor",
             "other_tool:R2",
-            None,
+            [_TICKET_STEP],
         ),
         (
             "F1",
             interpretation("cancel", _NEW_TICKET),
             "Cancela eso, mejor crea un ticket para revisar el servidor",
             "other_tool:R2",
-            None,
+            [_TICKET_STEP],
         ),
         (
             "A1",
             interpretation("request_action", _NEW_MEETING, op("create_ticket", title="Caída")),
             "Mejor agenda una reunión con Juan y crea un ticket titulado Caída",
             "other_tool:R3",
-            replies.ONE_OPERATION_AT_A_TIME,
+            [
+                {"tool": "schedule_meeting", "args": {"attendees": ["Juan"]}},
+                {"tool": "create_ticket", "args": {"title": "Caída"}},
+            ],
         ),
         # The `other_tool:R4` case left in task 13: R4 now stores a clarification with the new
         # candidates (test_change_of_intention_into_r4_keeps_the_new_candidates).
-        # Review 12-1, should-fix 2 (D3.1): with `reject` or `cancel`, the operations of the
-        # pending tool go to the table too, so two `explicit` are R3, not the new ticket alone.
+        # Review 12-1, should-fix 2 had the pending tool's operations go to the table too (R3);
+        # the author's amendment to D3.1 (14a round 2) drops them: R2, the new ticket alone.
         (
             "F1",
             interpretation("reject", op("schedule_meeting", attendees=["Ana"]), _NEW_TICKET),
             "No, la reunión con Ana no; mejor crea un ticket para revisar el servidor",
-            "other_tool:R3",
-            replies.ONE_OPERATION_AT_A_TIME,
+            "other_tool:R2",
+            [_TICKET_STEP],
         ),
         (
             "F1",
             interpretation("cancel", op("schedule_meeting", attendees=["Ana"]), _NEW_TICKET),
             "Cancela la reunión con Ana y crea un ticket para revisar el servidor",
-            "other_tool:R3",
-            replies.ONE_OPERATION_AT_A_TIME,
+            "other_tool:R2",
+            [_TICKET_STEP],
+        ),
+        # The author's example (14a round 2): a meeting with no arguments, and the ticket.
+        (
+            "F1",
+            interpretation("cancel", op("schedule_meeting"), _NEW_TICKET),
+            "Cancela la reunión y crea un ticket para revisar el servidor",
+            "other_tool:R2",
+            [_TICKET_STEP],
         ),
     ],
 )
 def test_reject_or_cancel_with_another_tool_is_a_change_of_intention(
-    monkeypatch, first, turn, message, route, reply_end
+    monkeypatch, first, turn, message, route, steps
 ):
     calls = record_tools(monkeypatch)
     pending = handle_fixed(None, first).state_delta["pending"]
@@ -2113,12 +2138,11 @@ def test_reject_or_cancel_with_another_tool_is_a_change_of_intention(
     assert outcome.state_delta["history"] == [closed(pending, "abandoned")]
     discarded = DISCARDED_MEETING if first == "F1" else DISCARDED_TICKET
     assert _lines(outcome.reply)[0] == discarded
-    if reply_end is None:  # R2: the new ticket, with nothing of the meeting
-        record = outcome.state_delta["pending"]
-        assert record["steps"] == [{"tool": "create_ticket", "args": _NEW_TICKET["args"]}]
-    else:  # R3 creates nothing yet (task 14a): the pending record is gone all the same
-        assert outcome.state_delta["pending"] is None
-        assert outcome.reply == f"{discarded}\n{reply_end}"
+    record = outcome.state_delta["pending"]
+    assert record["steps"] == steps  # nothing of the abandoned record (D3.1)
+    assert record["tools"] == [step["tool"] for step in steps]
+    assert record["operation_id"] != pending["operation_id"]
+    assert outcome.reply.endswith(record["last_question"])
     assert nothing_ran(calls)
 
 
@@ -2438,3 +2462,369 @@ def test_closing_without_running_keeps_the_last_ten(first, turn, message, status
     assert new[-1] == {"operation_id": pending["operation_id"], "status": status, "steps": steps}
     assert new[:-1] == received[1:]
     assert history == received
+
+
+# Brief 14a ------------------------------------------------------------------------------------
+
+E1_QUESTION = (
+    "Para crear un ticket necesito el título y la descripción. "
+    "Para enviar una notificación necesito el mensaje."
+)
+E1_STEPS = [
+    {"tool": "create_ticket", "args": {"priority": "alta", "assignee": "Carlos"}},
+    {
+        "tool": "send_notification",
+        "args": {"recipient": "Carlos", "channel": "email"},
+        "depends_on": "create_ticket",
+    },
+]
+ID_LINK_LINE = "El mensaje llevará al final el número de ticket."
+DISCARDED_E1 = (
+    "No voy a crear un ticket ni enviar una notificación; descarté lo que tenía pendiente."
+)
+
+
+def e1_pending() -> dict:
+    return handle_fixed(None, "E1").state_delta["pending"]
+
+
+def e2_pending() -> dict:
+    """The plan of `E1` completed by `E2`: awaiting confirmation."""
+    return handle_fixed(e1_pending(), "E2").state_delta["pending"]
+
+
+def plan_confirmation(record: dict) -> str:
+    """What a plan awaiting confirmation shows, with each step's `depends_on` (decision D)."""
+    depends_on = [step.get("depends_on") for step in record["steps"]]
+    summary = replies.confirmation_summary(shown_values(record["steps"], NOW), depends_on)
+    return f"{summary}\n{record['last_question']}"
+
+
+# 5 (D3 R3, D8.1, D18, D4 rules 4 and 9, D42; TASK.md lines 378-386)
+def test_r3_builds_a_plan(monkeypatch):
+    calls = record_tools(monkeypatch)
+
+    outcome = handle_fixed(None, "E1")
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "R3"
+    assert list(outcome.state_delta) == ["pending"]
+    assert record == {
+        "operation_id": record["operation_id"],
+        "status": "collecting",
+        "tools": ["create_ticket", "send_notification"],
+        "steps": E1_STEPS,
+        "missing": ["title", "description", "message"],
+        "invalid": [],
+        "last_question": E1_QUESTION,
+    }
+    assert _lines(outcome.reply) == [
+        "Anoté la prioridad: alta.",
+        "Anoté a quién se asigna: Carlos.",
+        "Anoté a quién se envía: Carlos.",
+        "Anoté el canal: email.",
+        E1_QUESTION,
+    ]
+    assert outcome.depends == ["send_notification<create_ticket"]
+
+    # A name not written in the message never gets in (D4 rule 3).
+    pedro = json.loads(json.dumps(FIXED["E1"].interpretation))
+    pedro["operations"][1]["args"]["recipient"] = "Pedro"
+    turn = TurnInterpretation.model_validate(pedro)
+    rejected = handle(None, turn, FIXED["E1"].message)
+    notice = rejected.state_delta["pending"]["steps"][1]
+    assert notice["args"] == {"channel": "email"}
+    assert rejected.state_delta["pending"]["missing"] == [
+        "title",
+        "description",
+        "recipient",
+        "message",
+    ]
+    assert _lines(rejected.reply)[-2:] == [
+        replies.REJECTED_NAME_LINE,
+        rejected.state_delta["pending"]["last_question"],
+    ]
+    assert "Pedro" not in json.dumps(rejected.state_delta, ensure_ascii=False)
+
+    # Three steps: a ticket, a meeting and a notice, all `explicit`.
+    three = interpretation(
+        "request_action",
+        op("create_ticket", assignee="Carlos"),
+        op("schedule_meeting", attendees=["Juan"]),
+        op("send_notification", recipient="Ana"),
+    )
+    record = handle(None, three, "Crea un ticket para Carlos, reúnete con Juan y avísale a Ana")
+    record = record.state_delta["pending"]
+    assert record["tools"] == ["create_ticket", "schedule_meeting", "send_notification"]
+    assert [step.get("depends_on") for step in record["steps"]] == [None, None, "create_ticket"]
+    assert nothing_ran(calls)
+
+
+# 6 (D3 *Misma tool*, D18; case E; the `request_action` variant is finding 10 of 06-round-1)
+@pytest.mark.parametrize("act", ["provide_info", "request_action"])
+def test_plan_same_tool_merges_by_step(monkeypatch, act):
+    calls = record_tools(monkeypatch)
+    pending = e1_pending()
+    turn = TurnInterpretation.model_validate({**FIXED["E2"].interpretation, "act": act})
+
+    outcome = handle(pending, turn, FIXED["E2"].message)
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "same_tool"
+    assert record["status"] == "awaiting_confirmation"
+    assert record["operation_id"] == pending["operation_id"]
+    assert record["steps"] == [
+        {
+            "tool": "create_ticket",
+            "args": {
+                "title": "Servidor caído",
+                "description": "el servidor de producción no responde",
+                "priority": "alta",
+                "assignee": "Carlos",
+            },
+        },
+        {
+            "tool": "send_notification",
+            "args": {
+                "recipient": "Carlos",
+                "message": "ya se registró la falla",
+                "channel": "email",
+            },
+            "depends_on": "create_ticket",
+        },
+    ]
+    assert _lines(outcome.reply) == [
+        "Anoté el título: Servidor caído.",
+        "Anoté la descripción: el servidor de producción no responde.",
+        "Anoté el mensaje: ya se registró la falla.",
+        "Voy a crear un ticket con estos datos:",
+        "- El título: Servidor caído",
+        "- La descripción: el servidor de producción no responde",
+        "- La prioridad: alta",
+        "- A quién se asigna: Carlos",
+        "Voy a enviar una notificación con estos datos:",
+        "- A quién se envía: Carlos",
+        "- El mensaje: ya se registró la falla",
+        "- El canal: correo",
+        ID_LINK_LINE,
+        "¿Confirmas que quieres crear un ticket y enviar una notificación? Responde sí o no.",
+    ]
+    assert nothing_ran(calls)
+
+    # An operation of only one of the two tools completes only that step.
+    ticket_only = interpretation(act, FIXED["E2"].interpretation["operations"][0])
+    partial = handle(pending, ticket_only, FIXED["E2"].message).state_delta["pending"]
+    assert partial["status"] == "collecting"
+    assert partial["missing"] == ["message"]
+    assert partial["steps"][1] == E1_STEPS[1]
+    assert partial["last_question"] == "Para enviar una notificación necesito el mensaje."
+
+
+# 7 (D8.2, D7.2, decision D)
+def test_plan_confirmation_line_and_hash(monkeypatch):
+    calls = record_tools(monkeypatch)
+    ready = e2_pending()
+
+    assert ready["confirmation_hash"] == confirmation_hash(shown_values(ready["steps"], NOW))
+    assert ID_LINK_LINE not in ready["last_question"]
+
+    # Shown again after a turn without changes, and after a correction.
+    repeated = handle_fixed(ready, "E2")
+    assert repeated.state_delta == {}
+    assert repeated.reply.endswith(plan_confirmation(ready))
+    correction = interpretation("provide_info", op("send_notification", message="ya quedó"))
+    corrected = handle(ready, correction, "Mejor el mensaje: ya quedó")
+    record = corrected.state_delta["pending"]
+    assert record["status"] == "awaiting_confirmation"
+    assert record["confirmation_hash"] != ready["confirmation_hash"]
+    assert record["steps"][1]["depends_on"] == "create_ticket"
+    for outcome in (repeated, corrected, handle_fixed(ready, "G2")):
+        lines = _lines(outcome.reply)
+        assert lines.count(ID_LINK_LINE) == 1
+        assert lines[lines.index(ID_LINK_LINE) - 1] == "- El canal: correo"
+
+    # Never in a plan without a declared link (a ticket and a meeting), nor in one operation.
+    message = f"Crea un ticket titulado Servidor caído para Carlos y {_COMPLETE_MEETING_MESSAGE}"
+    ticket_and_meeting = interpretation(
+        "request_action",
+        FIXED["H1"].interpretation["operations"][0],
+        _meeting().model_dump()["operations"][0],
+    )
+    plan = handle(None, ticket_and_meeting, message)
+    assert plan.route == "R3"
+    assert plan.state_delta["pending"]["status"] == "awaiting_confirmation"
+    assert plan.depends == []
+    single = handle_fixed(None, "H1")
+
+    # Review 14a-1, finding 2: the receiving tool alone, and the receiving tool depending on a
+    # tool that is not its producer (a meeting), never show the line either.
+    notice = handle_fixed(None, "G1")
+    assert notice.state_delta["pending"]["status"] == "awaiting_confirmation"
+    after_meeting = {
+        **FIXED["G1"].interpretation["operations"][0],
+        "depends_on": "schedule_meeting",
+    }
+    meeting_then_notice = interpretation(
+        "request_action", _meeting().model_dump()["operations"][0], after_meeting
+    )
+    other_link = handle(
+        None, meeting_then_notice, f"{FIXED['G1'].message} y {_COMPLETE_MEETING_MESSAGE}"
+    )
+    record = other_link.state_delta["pending"]
+    assert record["status"] == "awaiting_confirmation"
+    assert record["steps"][1]["depends_on"] == "schedule_meeting"
+    for outcome in (plan, single, notice, other_link):
+        assert "llevará al final" not in outcome.reply
+    assert nothing_ran(calls)
+
+
+# Review 14a-1, note 4 (decision B): R2 drops the `depends_on` of a lone operation; its record
+# keeps the shape of every R2 record, `{tool, args}`.
+def test_r2_ignores_depends_on():
+    lone = {**FIXED["G1"].interpretation["operations"][0], "depends_on": "create_ticket"}
+
+    outcome = handle(None, interpretation("request_action", lone), FIXED["G1"].message)
+
+    assert outcome.route == "R2"
+    assert outcome.depends is None
+    assert outcome.state_delta["pending"]["steps"] == [
+        {"tool": "send_notification", "args": lone["args"]}
+    ]
+
+
+# 8 (decision F): a "yes" to a plan runs nothing until task 14b.
+@pytest.mark.parametrize("confirms_tool", [None, "send_notification", "create_ticket"])
+def test_yes_to_a_plan_runs_nothing_yet(monkeypatch, confirms_tool):
+    calls = record_tools(monkeypatch)
+    ready = e2_pending()
+
+    outcome = handle(ready, confirm(confirms_tool=confirms_tool), FIXED["G2"].message)
+
+    assert outcome.route == "confirm_plan_provisional"
+    assert outcome.reply == f"{replies.PLAN_NOT_RUN_YET}\n{plan_confirmation(ready)}"
+    assert outcome.state_delta == {}  # reassessed against `now`: nothing changed (D57)
+    assert outcome.results == []
+    assert nothing_ran(calls)
+
+
+def test_yes_to_a_plan_naming_another_tool_is_vetoed(monkeypatch):
+    calls = record_tools(monkeypatch)
+    ready = e2_pending()
+
+    for turn in (fixed("G2"), confirm(confirms_tool="schedule_meeting")):
+        outcome = handle(ready, turn, FIXED["G2"].message)
+        expected = "confirm_vetoed" if turn.confirms_tool else "confirm_plan_provisional"
+        assert outcome.route == expected
+        assert outcome.state_delta == {}
+    assert nothing_ran(calls)
+
+
+# 9 (D7.3, D3.1, D65)
+def test_plan_discard_and_change_of_intention(monkeypatch):
+    calls = record_tools(monkeypatch)
+    pending = e1_pending()
+
+    cancelled = handle(pending, interpretation("cancel"), "Cancela todo")
+    assert cancelled.route == "cancelled"
+    assert cancelled.reply == DISCARDED_E1
+    assert cancelled.state_delta == {
+        "pending": None,
+        "history": [
+            {"operation_id": pending["operation_id"], "status": "cancelled", "steps": E1_STEPS}
+        ],
+    }
+
+    changed = handle_fixed(pending, "F1")
+    record = changed.state_delta["pending"]
+    assert changed.route == "other_tool:R2"
+    assert _lines(changed.reply)[0] == DISCARDED_E1
+    assert changed.state_delta["history"] == [closed(pending, "abandoned")]
+    assert record["steps"] == [{"tool": "schedule_meeting", "args": {"attendees": ["Juan"]}}]
+    assert "Carlos" not in json.dumps(record)
+    assert nothing_ran(calls)
+
+
+# 10 ((A12), D3.1, D71 *Pendiente*; TASK.md line 413): *Otra tool* never inherits into a plan.
+def test_other_tool_never_inherits_into_a_plan(monkeypatch):
+    calls = record_tools(monkeypatch)
+    titled = interpretation("request_action", op("create_ticket", title="Servidor caído"))
+    pending = handle(None, titled, "Crea un ticket titulado Servidor caído").state_delta["pending"]
+    turn = interpretation(
+        "request_action",
+        op("create_ticket", description="revisar la red"),
+        op("send_notification", recipient="Carlos"),
+    )
+
+    outcome = handle(pending, turn, "Mejor crea un ticket para revisar la red y avísale a Carlos")
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "other_tool:R3"
+    assert outcome.state_delta["history"] == [closed(pending, "abandoned")]
+    assert record["steps"] == [
+        {"tool": "create_ticket", "args": {"description": "revisar la red"}},
+        {
+            "tool": "send_notification",
+            "args": {"recipient": "Carlos"},
+            "depends_on": "create_ticket",
+        },
+    ]
+    assert "Servidor caído" not in json.dumps(record, ensure_ascii=False)
+    assert _lines(outcome.reply)[0] == DISCARDED_TICKET
+    assert outcome.depends == ["send_notification<create_ticket:inferred"]
+    assert nothing_ran(calls)
+
+
+# Round 2 of brief 14a (the author's amendment to D3.1; review 14a-1, finding 1): in a change of
+# intention with `reject` or `cancel`, the operations of the pending (or candidate) tools never
+# reach the table; only the new tool's do. `request_action`/`provide_info` keep the whole turn.
+CANCEL_MEETING_MESSAGE = "Cancela la reunión y crea un ticket para revisar el servidor"
+TICKET_ONLY_STEPS = [{"tool": "create_ticket", "args": {"description": "revisar el servidor"}}]
+
+
+@pytest.mark.parametrize("act", ["cancel", "reject"])
+def test_reject_or_cancel_drops_the_rejected_tool(monkeypatch, act):
+    calls = record_tools(monkeypatch)
+    meeting = f1_pending()
+    turn = interpretation(act, op("schedule_meeting"), _NEW_TICKET)
+
+    outcome = handle(meeting, turn, CANCEL_MEETING_MESSAGE)
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "other_tool:R2"
+    assert outcome.depends is None  # one flow, not a plan
+    assert outcome.state_delta["history"] == [closed(meeting, "abandoned")]
+    assert record["tools"] == ["create_ticket"]
+    assert record["steps"] == TICKET_ONLY_STEPS
+    assert _lines(outcome.reply) == [
+        DISCARDED_MEETING,
+        "Anoté la descripción: revisar el servidor.",
+        record["last_question"],
+    ]
+    assert "reunión" not in record["last_question"]
+
+    # The same in rule 4 of a clarification: the candidate the user turned down is dropped.
+    clarifying = handle_fixed(None, "C1").state_delta["pending"]
+    no_notice = interpretation(act, op("send_notification"), _NEW_TICKET)
+    answered = handle(
+        clarifying, no_notice, "No le avises; mejor crea un ticket para revisar el servidor"
+    )
+    assert answered.route == "clarification:regla_4:R2"
+    assert answered.state_delta["pending"]["steps"] == TICKET_ONLY_STEPS
+    assert nothing_ran(calls)
+
+
+def test_request_action_with_another_tool_still_takes_the_whole_turn(monkeypatch):
+    calls = record_tools(monkeypatch)
+    meeting = f1_pending()
+    turn = interpretation("request_action", op("schedule_meeting", attendees=["Ana"]), _NEW_TICKET)
+
+    outcome = handle(
+        meeting, turn, "Agenda la reunión con Ana y crea un ticket para revisar el servidor"
+    )
+
+    assert outcome.route == "other_tool:R3"
+    assert outcome.state_delta["pending"]["steps"] == [
+        {"tool": "schedule_meeting", "args": {"attendees": ["Ana"]}},
+        *TICKET_ONLY_STEPS,
+    ]
+    assert nothing_ran(calls)

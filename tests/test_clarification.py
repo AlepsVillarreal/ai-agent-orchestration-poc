@@ -416,22 +416,152 @@ def test_rule_3_one_candidate_yes_never_runs(monkeypatch):
     assert calls["schedule_meeting"] == [] and calls["create_ticket"] == []
 
 
-# 8 (decision D): two chosen tools wait for the plan of task 14a; nothing is lost.
-@pytest.mark.parametrize("act", ["provide_info", "request_action"])
-def test_rule_2_with_two_tools_waits_for_the_plan(monkeypatch, act):
+# 8. Task 14a ((A17), D76 *Pendiente*, D3 rule 2, D4 rule 9; TASK.md lines 344-350): "both"
+# forms the plan, in the candidates' order, with what each candidate already had. It was
+# `test_rule_2_with_two_tools_waits_for_the_plan` (the provisional template of D76).
+C1_PLAN_STEPS = [
+    {"tool": c["tool"], "args": c["args"]} for c in C1_CANDIDATES
+]  # no step depends on another: no `depends_on` (decision B of brief 14a)
+C1_INHERITED = [
+    *INHERITED,
+    "Anoté la fecha: mañana.",
+    "Anoté los asistentes: Carlos.",
+]
+C1_PLAN_QUESTION = (
+    "Para enviar una notificación necesito el canal. "
+    "Para programar una reunión necesito el título, la hora y la duración en minutos."
+)
+
+
+@pytest.mark.parametrize(
+    ("turn", "message"),
+    [
+        (with_act("K1", "provide_info"), FIXED["K1"].message),
+        (with_act("K1", "request_action"), FIXED["K1"].message),
+        measured(RUN_06, "K1"),
+    ],
+    ids=["K1", "K1_request_action", "K1_measured"],
+)
+def test_rule_2_with_two_tools_forms_the_plan(monkeypatch, turn, message):
     calls = record_tools(monkeypatch)
     pending = c1_record()
 
-    outcome = handle(pending, with_act("K1", act), FIXED["K1"].message)
+    outcome = handle(pending, turn, message)
+    record = outcome.state_delta["pending"]
 
     assert outcome.route == "clarification:regla_2"
-    assert outcome.reply == replies.ONE_OPERATION_AT_A_TIME
-    assert outcome.state_delta == {}
+    assert list(outcome.state_delta) == ["pending"]
+    assert record == {
+        "operation_id": pending["operation_id"],
+        "status": "collecting",
+        "tools": ["send_notification", "schedule_meeting"],
+        "steps": C1_PLAN_STEPS,
+        "missing": ["channel", "title", "time", "duration_minutes"],
+        "invalid": [],
+        "last_question": C1_PLAN_QUESTION,
+    }
+    assert outcome.reply.split("\n") == [*C1_INHERITED, C1_PLAN_QUESTION]
+    assert outcome.depends == []
+    assert nothing_ran(calls)
 
-    later = handle_fixed(pending, "K2")
-    assert later.route == "clarification:regla_2"
-    assert later.state_delta["pending"]["steps"][0]["args"] == C1_CANDIDATES[0]["args"]
-    assert later.reply.split("\n")[:2] == INHERITED
+
+def _with_candidates(record: dict, depends_on: dict[str, str | None]) -> dict:
+    """The record of `C1` with each candidate's `depends_on` replaced."""
+    candidates = [{**c, "depends_on": depends_on[c["tool"]]} for c in record["candidates"]]
+    return {**record, "candidates": candidates}
+
+
+# The `depends_on` the candidates brought between them is kept (D3: "D8 la valida"); one that
+# names a candidate not chosen, or a tool that is not a candidate, is ignored.
+@pytest.mark.parametrize(
+    ("depends_on", "tools", "effective", "log"),
+    [
+        (
+            {"send_notification": "schedule_meeting", "schedule_meeting": None},
+            ["schedule_meeting", "send_notification"],
+            [None, "schedule_meeting"],
+            ["send_notification<schedule_meeting"],
+        ),
+        (
+            {"send_notification": "create_ticket", "schedule_meeting": None},
+            ["send_notification", "schedule_meeting"],
+            [None, None],
+            ["send_notification<create_ticket:ignored"],
+        ),
+    ],
+    ids=["kept", "names_no_candidate"],
+)
+def test_rule_2_plan_keeps_the_candidates_dependency(
+    monkeypatch, depends_on, tools, effective, log
+):
+    calls = record_tools(monkeypatch)
+    pending = _with_candidates(c1_record(), depends_on)
+
+    outcome = handle(pending, fixed("K1"), FIXED["K1"].message)
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "clarification:regla_2"
+    assert record["tools"] == tools
+    assert [step.get("depends_on") for step in record["steps"]] == effective
+    assert outcome.depends == log
+    # D4 rule 9: the inherited lines follow the steps' order.
+    meeting = ["Anoté la fecha: mañana.", "Anoté los asistentes: Carlos."]
+    expected = [*meeting, *INHERITED] if tools[0] == "schedule_meeting" else C1_INHERITED
+    assert outcome.reply.split("\n")[:4] == expected
+    assert nothing_ran(calls)
+
+
+# Review 14a-1, note 5: a `depends_on` that names a candidate the answer did not choose is
+# ignored and logged (three candidates, two chosen); nothing is inferred between these two.
+def test_rule_2_plan_ignores_a_dependency_on_a_candidate_not_chosen(monkeypatch):
+    calls = record_tools(monkeypatch)
+    pending = _with_candidates(
+        c1_record(), {"send_notification": "create_ticket", "schedule_meeting": None}
+    )
+    pending["candidates"].append({"tool": "create_ticket", "args": {}, "depends_on": None})
+    pending["tools"] = [*pending["tools"], "create_ticket"]
+
+    outcome = handle(pending, fixed("K1"), FIXED["K1"].message)
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "clarification:regla_2"
+    assert record["tools"] == ["send_notification", "schedule_meeting"]
+    assert all("depends_on" not in step for step in record["steps"])
+    assert outcome.depends == ["send_notification<create_ticket:ignored"]
+    assert nothing_ran(calls)
+
+
+# Decision E of brief 14a, the author's answer (a): a plan born from a clarification infers the
+# dependency the registry declares, like any plan (D8.4 over D3 rule 2's "no añade ninguna").
+def test_rule_2_plan_infers_the_declared_dependency(monkeypatch):
+    calls = record_tools(monkeypatch)
+    maybe = interpretation(
+        "request_action",
+        op("create_ticket", assignee="Carlos"),
+        op("send_notification", "plausible", recipient="Carlos"),
+    )
+    asked = handle(None, maybe, "Crea un ticket para Carlos y quizá avísale a Carlos")
+    pending = asked.state_delta["pending"]
+    assert asked.route == "R4"
+    both = interpretation("provide_info", op("create_ticket"), op("send_notification"))
+
+    outcome = handle(pending, both, "Las dos")
+    record = outcome.state_delta["pending"]
+
+    assert outcome.route == "clarification:regla_2"
+    assert record["steps"] == [
+        {"tool": "create_ticket", "args": {"assignee": "Carlos"}},
+        {
+            "tool": "send_notification",
+            "args": {"recipient": "Carlos"},
+            "depends_on": "create_ticket",
+        },
+    ]
+    assert outcome.depends == ["send_notification<create_ticket:inferred"]
+    assert outcome.reply.split("\n")[:2] == [
+        "Anoté a quién se asigna: Carlos.",
+        "Anoté a quién se envía: Carlos.",
+    ]
     assert nothing_ran(calls)
 
 
@@ -456,19 +586,26 @@ def test_rule_4_is_a_change_of_intention(monkeypatch, act):
     assert nothing_ran(calls)
 
 
-def test_rule_4_into_r3_empties_pending(monkeypatch):
+# Task 14a (D71 *Pendiente*, AW 1): a rule 4 that falls in R3 now stores the plan of the turn's
+# operations, with nothing of the clarification (D3.1). It was `..._empties_pending`.
+def test_rule_4_into_r3_stores_the_plan(monkeypatch):
     calls = record_tools(monkeypatch)
     pending = c1_record()
     both = interpretation("request_action", op("create_ticket"), op("send_notification"))
 
     outcome = handle(pending, both, "Mejor crea un ticket y avísale")
+    record = outcome.state_delta["pending"]
 
     assert outcome.route == "clarification:regla_4:R3"
-    assert outcome.state_delta == {
-        "pending": None,
-        "history": [closed_clarification(pending, "abandoned")],
-    }
-    assert outcome.reply == f"{DISCARDED_BOTH}\n{replies.ONE_OPERATION_AT_A_TIME}"
+    assert outcome.state_delta["history"] == [closed_clarification(pending, "abandoned")]
+    assert record["steps"] == [
+        {"tool": "create_ticket", "args": {}},
+        {"tool": "send_notification", "args": {}, "depends_on": "create_ticket"},
+    ]
+    assert record["operation_id"] != pending["operation_id"]
+    assert "Carlos" not in json.dumps(record)
+    assert outcome.reply == f"{DISCARDED_BOTH}\n{record['last_question']}"
+    assert outcome.depends == ["send_notification<create_ticket:inferred"]
     assert nothing_ran(calls)
 
 
@@ -518,9 +655,10 @@ def test_measured_answers_through_the_core(monkeypatch, path, key, route):
     outcome = handle(c1_record(), turn, message)
 
     assert outcome.route == route
-    if key == "K1":  # two tools: the provisional template, nothing changed (decision D)
-        assert outcome.reply == replies.ONE_OPERATION_AT_A_TIME
-        assert outcome.state_delta == {}
+    if key == "K1":  # two tools: the plan of task 14a, in the candidates' order
+        record = outcome.state_delta["pending"]
+        assert record["tools"] == ["send_notification", "schedule_meeting"]
+        assert record["steps"] == C1_PLAN_STEPS
     assert nothing_ran(calls)
 
 

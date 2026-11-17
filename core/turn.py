@@ -28,13 +28,16 @@ Order of a turn (D3, *Compuerta de entrada*):
      runs (what D4 requires of D7); (4) still `collecting` -> repeat the question (D7.1);
      (5) the hash of the shown values must match (D7.2), else show them again with the new
      hash, after a line that says the values changed (author's answer on note (ddd));
-     (6) `_run_confirmed` runs each step under its idempotency key (D9.1-D9.3), stops at the
-     first step that does not end done, empties `pending`, answers with one line per step
-     tried and appends the record to `history` as completed, failed or uncertain.
+     a plan of two or more steps stops here until task 14b: a provisional line and the
+     confirmation again (decision F of brief 14a); (6) `_run_confirmed` runs each step under
+     its idempotency key (D9.1-D9.3), stops at the first step that does not end done, empties
+     `pending`, answers with one line per step tried and appends the record to `history` as
+     completed, failed or uncertain.
    - *Otra tool* (D3.1): S has a tool that is not pending and `act` is `request_action`,
      `provide_info`, `reject` or `cancel` -> the record goes to `history` as `abandoned` and the
      rules table runs on every operation of the turn against nothing stored, after the discard
-     line (author's answer B to brief 12). A `confirm` with another tool is D45, not this.
+     line (author's answer B to brief 12); with `reject`/`cancel`, only on the new tools'
+     operations (author's amendment in 14a round 2). A `confirm` with another tool is D45.
    - *Misma tool*: `act` is `request_action` or `provide_info` and every operation is of a
      pending tool (none at all counts too) -> each operation is anchored and merged into the
      step of its tool (D4, D18); `certainty` is ignored (D2). The reply shows every change,
@@ -51,21 +54,13 @@ Order of a turn (D3, *Compuerta de entrada*):
 4. Nothing pending -> route by `act`; a request goes to the rules table (R1-R5), which counts
    operations by certainty and never looks at tool names (TASK.md line 562). R2 anchors and
    merges against an empty record (D4 rule 4), so a name not written in the message never
-   gets in and the `_add`/`_remove` buckets are applied, never stored (D4 rule 10). R4 and R5
-   store a clarification, its candidates anchored the same way. Each new record gets an
-   `operation_id` (a uuid, read by the log).
-5. After every merge (R2 and *Misma tool*, `confirm` included) each step is validated
-   (`core/validation.py`, D5):
-   - something missing or invalid -> `status: collecting`; `missing` and `invalid`
-     (`{tool, field, cause}`, never a value) come from the validator. One reply names the
-     invalid fields (with their allowed values) after the change lines, then asks once for
-     every missing or invalid field (`last_question`, D17: labels only).
-   - every step valid -> `status: awaiting_confirmation` with the hash of the shown values
-     (`confirmation_hash`, D7.2). The reply shows the normalized values of each step and asks
-     for a yes; `last_question` keeps only that question, without values (D43). Nothing runs
-     in the turn a record becomes complete (D7.1).
-   Dates and times are resolved against `TurnInput.now` (D5.1, D5.2), so the shown values
-   (the ISO date of "mañana") and their hash depend on the moment of the turn.
+   gets in and the `_add`/`_remove` buckets are applied, never stored (D4 rule 10). R3 makes a
+   plan of the same steps, ordered by `core/plan.py` (D8.1, D8.4), and so does a clarification
+   resolved to two or more tools. R4 and R5 store a clarification, its candidates anchored the
+   same way. Each new record gets an `operation_id` (a uuid, read by the log).
+5. After every merge each step is validated and the record assessed (`core/assessment.py`):
+   `collecting` asks once for what is missing or invalid; `awaiting_confirmation` shows the
+   values and asks for a yes. Nothing runs in the turn a record becomes complete (D7.1).
 
 The message text is used only to anchor names (D4 rule 3): it goes neither to the state nor to
 the log. The core never reads the clock: `now` comes from the turn node. The normalized values
@@ -74,14 +69,19 @@ are recomputed every time, never stored (D44).
 
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
 from uuid import uuid4
 
 from core import clarification, replies
+from core.assessment import (
+    AWAITING_CONFIRMATION,
+    COLLECTING,
+    assessment,
+    closing_line,
+    reassessed,
+)
 from core.clarification import AWAITING_CLARIFICATION
-from core.confirmation import confirmation_hash, shown_values
+from core.confirmation import shown_values
 from core.executions import (
     Executions,
     InMemoryExecutions,
@@ -100,41 +100,12 @@ from core.history import (
     closed_status,
 )
 from core.interpretation import Act, Certainty, TurnInterpretation
-from core.merge import Change, MergeResult, Rejected, merge_args
+from core.merge import MergeResult, merge_args
 from core.operations import filter_by_registry, join_split_operations
+from core.outcome import TurnInput, TurnOutcome
+from core.plan import plan_order
 from core.presence import drop_absent
 from core.registry import TOOLS, ToolSpec
-from core.validation import validate
-
-COLLECTING = "collecting"
-AWAITING_CONFIRMATION = "awaiting_confirmation"
-
-
-@dataclass(frozen=True)
-class TurnInput:
-    """What the core needs from the turn that does not come from the interpreter.
-
-    `message` is the user's text, read only to anchor names (D4 rule 3). `now` is the moment of
-    the turn, local and naive: dates and times are validated against it (D5.1, D5.2). It has no
-    default, so every caller, tests included, says which moment it validates against; only the
-    turn node reads the clock. `session_id` goes into every idempotency key (D9.1); it has no
-    default either, so two sessions never share keys by a forgotten argument.
-    """
-
-    message: str
-    now: datetime
-    session_id: str
-
-
-@dataclass
-class TurnOutcome:
-    reply: str
-    state_delta: dict[str, Any] = field(default_factory=dict)  # empty = state unchanged (D1.1)
-    route: str = ""  # which branch decided the turn: "R2", "confirmed", ... (tests and the log)
-    changes: list[Change] = field(default_factory=list)  # for the log (D4 rule 8)
-    rejected: list[Rejected] = field(default_factory=list)  # for the log (D4 rule 3)
-    invalid: list[dict] = field(default_factory=list)  # the record's `invalid`, for the log (D5)
-    results: list[StepRun] = field(default_factory=list)  # per step tried after a "yes" (D9)
 
 
 def handle_turn(
@@ -190,6 +161,9 @@ def _decide(
             return _clarification_gate(pending, act, operations, turn_input, confirms_tool, history)
         if act == Act.CONFIRM:
             outcome = _confirm(pending, operations, turn_input, confirms_tool, dropped_some)
+            if outcome is None and len(pending["steps"]) > 1:  # decision F: until task 14b
+                outcome = _repeat_pending(pending, [], turn_input.now, "confirm_plan_provisional")
+                outcome.reply = f"{replies.PLAN_NOT_RUN_YET}\n{outcome.reply}"
             return outcome or _run_confirmed(pending, turn_input, history, executions)
         return _pending_gate(pending, act, operations, turn_input, history, same_tool)
 
@@ -218,18 +192,19 @@ def _clarification_gate(
         closed = _closed_without_running(pending, CANCELLED, steps, history)
         return TurnOutcome(replies.NO_ACTION_STARTED, state_delta=closed, route=route)
     if rule == clarification.CHANGE_OF_INTENTION:
-        return _change_of_intention(pending, steps, operations, turn_input, history, route)
+        return _change_of_intention(pending, act, steps, operations, turn_input, history, route)
     if rule == clarification.REPEAT:
         return TurnOutcome(pending["last_question"], route=route)  # D3.2: nothing changes
 
-    chosen = clarification.chosen(pending, rule, operations)
-    if len(chosen) > 1:  # a plan of candidates is task 14a; the clarification stays as it is
-        return TurnOutcome(replies.ONE_OPERATION_AT_A_TIME, route=route)
-    [(tool, stored, incoming)] = chosen
-    outcome = _start_flow(tool, stored, incoming, turn_input, route, pending["operation_id"])
-    # D4 rule 9: every inherited value first, then the lines of this turn's own merge.
-    outcome.reply = "\n".join([*replies.inherited_lines(tool, stored), outcome.reply])
-    return outcome
+    # Rules 2 and 3: one tool starts its flow; two or more form a plan in the candidates' order
+    # with the `depends_on` they brought, ordered and inferred like any plan (D3, D8; decision E
+    # of brief 14a, the author's answer: D8.4 applies here too).
+    named = {candidate["tool"]: candidate["depends_on"] for candidate in pending["candidates"]}
+    parts = [
+        _part(tool.name, stored, incoming, named[tool.name])
+        for tool, stored, incoming in clarification.chosen(pending, rule, operations)
+    ]
+    return _start_flow(parts, turn_input, route, pending["operation_id"])
 
 
 def _pending_gate(
@@ -251,7 +226,8 @@ def _pending_gate(
     )
     if other_tool and act in (Act.REQUEST_ACTION, Act.PROVIDE_INFO, Act.REJECT, Act.CANCEL):
         steps = pending["steps"]
-        return _change_of_intention(pending, steps, operations, turn_input, history, "other_tool")
+        route = "other_tool"
+        return _change_of_intention(pending, act, steps, operations, turn_input, history, route)
     if same_tool:
         steps, merges = _merge_steps(pending, operations, turn_input.message)
         return _after_merge(pending, steps, merges, now, route="same_tool")
@@ -273,6 +249,7 @@ def _pending_gate(
 
 def _change_of_intention(
     pending: dict,
+    act: Act,
     steps: list[dict],
     operations: list[dict],
     turn_input: TurnInput,
@@ -280,11 +257,16 @@ def _change_of_intention(
     route: str,
 ) -> TurnOutcome:
     """D3.1 (*Otra tool*, clarification rule 4): `pending` to `history` as `abandoned` with
-    `steps`, then the rules table on the whole turn, nothing inherited, after the D64 line."""
+    `steps`, then the rules table on the turn, nothing inherited, after the D64 line. With
+    `reject` or `cancel`, the operations of the pending (or candidate) tools are what the user
+    turned down, so only the new tools' operations reach the table (the author's amendment to
+    D3.1, review 14a-1, finding 1); with `request_action`/`provide_info`, the whole turn does."""
+    if act in (Act.REJECT, Act.CANCEL):
+        operations = [op for op in operations if op["tool"] not in pending["tools"]]
     outcome = _rules_table(operations, turn_input)
     outcome.route = f"{route}:{outcome.route}"
     outcome.reply = f"{_discarded_line(pending)}\n{outcome.reply}"
-    # R2, R4 and R5 write the new record; R3 creates nothing, so `pending` is emptied.
+    # R2-R5 write the new record over the emptied `pending`; R3's plan inherits nothing either.
     closed = _closed_without_running(pending, ABANDONED, steps, history)
     outcome.state_delta = {**closed, **outcome.state_delta}
     return outcome
@@ -323,11 +305,9 @@ def _rules_table(operations: list[dict], turn_input: TurnInput) -> TurnOutcome:
 
     if not operations:
         return TurnOutcome(replies.capabilities(), route="R1")
-    if len(explicit) == 1 and not plausible:
-        operation = explicit[0]
-        return _start_flow(TOOLS[operation["tool"]], {}, operation["args"], turn_input, "R2")
-    if len(explicit) >= 2 and not plausible:
-        return TurnOutcome(replies.ONE_OPERATION_AT_A_TIME, route="R3")
+    if not plausible:  # R2: one flow; R3: a plan, in the order of `core/plan.py` (D8.1)
+        parts = [_part(op["tool"], {}, op["args"], op["depends_on"]) for op in explicit]
+        return _start_flow(parts, turn_input, "R2" if len(parts) == 1 else "R3")
     # R4, R5: store the candidates; ask, after D4 rule 9's line if a name was dropped (D3).
     route = "R4" if explicit else "R5"
     record, changes, rejected = clarification.new_record(operations, turn_input.message)
@@ -338,23 +318,43 @@ def _rules_table(operations: list[dict], turn_input: TurnInput) -> TurnOutcome:
     return TurnOutcome(reply, {"pending": record}, route, changes, rejected)
 
 
+def _part(tool: str, stored: dict, incoming: dict, depends_on: str | None = None) -> dict:
+    """One operation of a flow about to start: its stored args, this turn's and `depends_on`."""
+    return {"tool": tool, "stored": stored, "incoming": incoming, "depends_on": depends_on}
+
+
 def _start_flow(
-    tool: ToolSpec,
-    stored: dict,
-    incoming: dict,
-    turn_input: TurnInput,
-    route: str,
-    operation_id: str | None = None,
+    parts: list[dict], turn_input: TurnInput, route: str, operation_id: str | None = None
 ) -> TurnOutcome:
-    """A one-step record (D18): `incoming` anchored and merged into `stored` (D4), then the
-    question or the confirmation. R2 starts from nothing with a new `operation_id`;
-    clarification rules 2 and 3 start from the candidate's args (never anchored again) and keep
-    the clarification's `operation_id`."""
-    merged = merge_args(tool, stored, incoming, turn_input.message)
-    steps = [{"tool": tool.name, "args": merged.args}]
-    record = {"operation_id": operation_id or uuid4().hex, "tools": [tool.name], "steps": steps}
-    record.update(_assessment(steps, turn_input.now))
-    return _pending_outcome(record, [(tool, merged)], turn_input.now, route=route)
+    """A new record (D18): per part, `incoming` anchored and merged into `stored` (D4 rule 4),
+    then the question or the confirmation. R2 and R3 start from nothing with a new
+    `operation_id`; clarification rules 2 and 3 start from the candidates' args (never anchored
+    again) and keep the clarification's `operation_id`.
+
+    One part is one step, without `depends_on` (it is ignored, as in R2). Two or more are a plan:
+    ordered by `plan_order`, and a step that depends on another keeps `depends_on` (decision B
+    of brief 14a), fixed here for good; the log gets the plan's dependencies. The reply lists
+    every inherited value first, step by step (D4 rule 9), then this turn's lines (D39).
+    """
+    order = plan_order(parts) if len(parts) > 1 else None
+    parts = order.steps if order else [{**parts[0], "depends_on": None}]
+    steps, merges, inherited = [], [], []
+    for part in parts:
+        tool = TOOLS[part["tool"]]
+        merged = merge_args(tool, part["stored"], part["incoming"], turn_input.message)
+        step = {"tool": tool.name, "args": merged.args}
+        if part["depends_on"] is not None:
+            step["depends_on"] = part["depends_on"]
+        steps.append(step)
+        merges.append((tool, merged))
+        inherited += replies.inherited_lines(tool, part["stored"])
+    record = {"operation_id": operation_id or uuid4().hex, "tools": [s["tool"] for s in steps]}
+    record["steps"] = steps
+    record.update(assessment(steps, turn_input.now))
+    outcome = _pending_outcome(record, merges, turn_input.now, route=route)
+    outcome.reply = "\n".join([*inherited, outcome.reply])
+    outcome.depends = order.log if order else None
+    return outcome
 
 
 def _merge_steps(
@@ -398,7 +398,7 @@ def _after_merge(
     if not any(merged.changes for _, merged in merges):
         return _repeat_pending(pending, merges, now, route)
 
-    return _pending_outcome(_reassessed(pending, steps, now), merges, now, route=route)
+    return _pending_outcome(reassessed(pending, steps, now), merges, now, route=route)
 
 
 def _repeat_pending(
@@ -410,16 +410,8 @@ def _repeat_pending(
     written only if the result differs from the stored one (a time that passed while it
     waited), else the state is unchanged (D40, D42). Nothing runs.
     """
-    record = _reassessed(pending, pending["steps"], now)
+    record = reassessed(pending, pending["steps"], now)
     return _pending_outcome(record, merges, now, route=route, changed=record != pending)
-
-
-def _reassessed(pending: dict, steps: list[dict], now: datetime) -> dict:
-    """`pending` with `steps` and their assessment against `now`; the old hash never stays."""
-    record = {key: value for key, value in pending.items() if key != "confirmation_hash"}
-    record["steps"] = steps
-    record.update(_assessment(steps, now))
-    return record
 
 
 def _confirm(
@@ -464,7 +456,7 @@ def _confirm(
     if pending["status"] != AWAITING_CONFIRMATION:
         return _repeat_pending(pending, [], now, route="confirm_incomplete")
 
-    record = _reassessed(pending, pending["steps"], now)
+    record = reassessed(pending, pending["steps"], now)
     if record["status"] != AWAITING_CONFIRMATION:
         return _pending_outcome(record, [], now, route="confirm_hash_changed")
     if record["confirmation_hash"] != pending.get("confirmation_hash"):
@@ -511,57 +503,6 @@ def _run_confirmed(
     )
 
 
-def _assessment(steps: list[dict], now: datetime) -> dict[str, Any]:
-    """`status`, `missing`, `invalid`, `last_question` and maybe `confirmation_hash` (D5, D7).
-
-    `missing` is what is absent, plus a date or a time without a part the code must not
-    complete (D5.1, D5.2); `invalid` lists `{tool, field, cause}` without the value. While
-    something is missing or invalid, the question names every missing and invalid field of each
-    step by its label, in registry order, and never carries a collected or an allowed value
-    (D2, D14, D17). When every step is valid, the record awaits confirmation: the question names
-    the actions only (D43) and the hash binds the values shown (D7.2), resolved against `now`.
-    """
-    missing, invalid, questions, ready = [], [], [], True
-    for step in steps:
-        tool = TOOLS[step["tool"]]
-        validation = validate(tool, step["args"], now)
-        ready = ready and validation.ready
-        missing += validation.missing
-        invalid += [
-            {"tool": tool.name, "field": item.field, "cause": item.cause}
-            for item in validation.invalid
-        ]
-        to_ask = validation.missing + [item.field for item in validation.invalid]
-        if to_ask:
-            questions.append(replies.missing_question(tool, to_ask))
-
-    if ready:
-        return {
-            "status": AWAITING_CONFIRMATION,
-            "missing": [],
-            "invalid": [],
-            "last_question": replies.confirmation_question([TOOLS[s["tool"]] for s in steps]),
-            "confirmation_hash": confirmation_hash(shown_values(steps, now)),
-        }
-    return {
-        "status": COLLECTING,
-        "missing": missing,
-        "invalid": invalid,
-        "last_question": " ".join(questions),  # never empty: something is missing or invalid
-    }
-
-
-def _closing_line(record: dict, now: datetime) -> str:
-    """The confirmation (values shown, then the question) or the question.
-
-    The shown values are recomputed from `args` against `now`, never stored (D44).
-    """
-    if record["status"] == AWAITING_CONFIRMATION:
-        summary = replies.confirmation_summary(shown_values(record["steps"], now))
-        return f"{summary}\n{record['last_question']}"
-    return record["last_question"]
-
-
 def _pending_outcome(
     record: dict,
     merges: list[tuple[ToolSpec, MergeResult]],
@@ -588,7 +529,7 @@ def _pending_outcome(
     for item in invalid:
         specs = {spec.name: spec for spec in TOOLS[item["tool"]].fields}
         lines.append(replies.invalid_line(specs[item["field"]], item["cause"]))
-    lines.append(_closing_line(record, now))
+    lines.append(closing_line(record, now))
 
     return TurnOutcome(
         "\n".join(lines),
