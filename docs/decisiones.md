@@ -879,4 +879,68 @@ autodecidida por el orquestador; revisable
   registro incompleto.
 - **Pendiente:** ningún test lo cubre: los tests del resumen usan un registro completo o
   ninguno (`test_pending_summary_has_no_collected_values`,
-  `test_pending_summary_when_nothing_is_pending`).
+  `test_pending_summary_when_nothing_is_pending`). [resuelto en la tarea 03]
+
+**D17 · Pregunta de faltantes: sin valores permitidos** (2026-11-16) · autodecidida por el
+orquestador; revisable
+
+- **Decisión:** la pregunta de faltantes (`missing_question`, `core/replies.py`) nombra cada
+  campo con su `label` del registro, en el orden del registro, y no añade "(alta, media o
+  baja)" a `priority` ni "(correo, SMS o push)" a `channel`. Esa misma pregunta se guarda en
+  `last_question`. Lo prueba `test_missing_question_has_no_collected_value_and_no_options`.
+- **Motivo:** la pregunta del caso B no lista opciones (TASK.md línea 319). `last_question`
+  llega al intérprete en el resumen de D14; con las opciones a la vista, el modelo puede
+  convertir "urgente" en "alta", lo que D2 descarta (líneas 166-168). Un valor fuera de la
+  lista lo rechaza el validador (D5), que pide la corrección (líneas 186-200).
+- **Descartadas:** listar las opciones en la respuesta y en `last_question` (le enseña al
+  modelo los valores válidos en cada turno de recopilación); listarlas solo en la respuesta
+  (`last_question` deja de ser lo que el usuario leyó).
+
+**D18 · Registro pendiente: una lista de pasos desde el primer flujo** (2026-11-16) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** el registro que R2 crea en `pending` (`_start_flow`, `core/turn.py`) guarda
+  `steps: [{tool, args}]` con un solo paso, junto a `status`, `tools`, `missing` y
+  `last_question`; no guarda `tool` ni `args` en la raíz. `tools` se conserva aunque repita
+  `steps[].tool`, porque D14 la lee y la aclaración la escribe sin `steps`. Lo prueban
+  `test_case_a_creates_pending_and_asks_for_missing` y
+  `test_pending_record_is_json_and_feeds_the_summary`.
+- **Motivo:** una operación es un plan de un paso. Fusión, validación, confirmación y
+  ejecución se escriben una vez sobre un paso, y el plan de D8.1 solo agrega pasos y
+  `depends_on` (TASK.md líneas 212-224 y 378). Es la misma información con otra disposición
+  dentro de `pending`: el usuario no ve cambio y no cambia cuándo se ejecuta nada.
+- **Descartada:** `tool` y `args` en la raíz y `steps` solo con el plan (la tarea del plan
+  reescribiría lo anterior o mantendría dos formas de registro).
+
+**D19 · Registro pendiente: `last_question` nulo con la solicitud completa** (2026-11-16) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** si la solicitud llega con todos los campos (`G1`, `H1`), R2 crea el registro
+  con `missing: []` y `last_question: None`, y responde con la plantilla provisional "Tengo
+  los datos; la validación y la confirmación aún no están disponibles." Nada se ejecuta. La
+  clave existe (D14) y el resumen escribe `none`. La tarea 09b lo reemplaza al crear
+  `awaiting_confirmation`.
+- **Motivo:** `last_question` es estado estructurado que el intérprete lee como la última
+  pregunta al usuario (TASK.md líneas 216 y 229); guardar la plantilla provisional le
+  mostraría algo que no es una pregunta.
+- **Precisa D16:** el valor de reserva `none` de `last_question` ya no aparece solo con un
+  registro mal formado: también con este registro completo. El texto de D16 no se edita.
+- **Descartada:** guardar el texto provisional en `last_question`.
+- **Pendiente:** ningún test lo cubre:
+  `test_complete_request_creates_pending_but_does_not_execute` no comprueba `last_question`
+  (revisión de la tarea 03). [resuelto en la tarea 03, ronda 2]
+
+**D20 · `question` y `other` sin nada pendiente: la plantilla de capacidades** (2026-11-16) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** sin registro pendiente, `question` y `other` responden con la misma
+  plantilla que R1, generada de las `action_phrase` del registro ("Puedo ayudarte a crear un
+  ticket, programar una reunión o enviar una notificación. ¿Qué necesitas?"). No tocan el
+  estado ni inician nada, aunque traigan operaciones. Lo prueba `test_nothing_pending_acts`.
+- **Motivo:** D3 (*Compuerta de entrada*, paso 4) solo pide "una plantilla"; una sola es la
+  opción más chica. Una intención informativa no inicia un flujo (TASK.md línea 554), y la
+  plantilla no nombra tools en el código (línea 562).
+- **Descartada:** una plantilla propia para `question`, que empiece distinto.
+- **Pendiente:** el test solo usa `question` y `other` sin operaciones; con una operación
+  `explicit` nada fija que no se inicie un flujo (revisión de la tarea 03). [resuelto en la
+  tarea 03, ronda 2]
