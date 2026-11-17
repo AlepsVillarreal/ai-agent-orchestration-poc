@@ -37,15 +37,48 @@ no forma parte del repositorio.
   opcionales y sin restricciones de rango; `priority` y `channel` llegan como la palabra del
   usuario ("alta", "correo"); fechas y horas como componentes (`day`, `month`, `year`,
   `relative_days`, `weekday` con la palabra del usuario; `hour`, `minute`). Enums solo donde
-  el modelo clasifica. Ausente = no dicho en este mensaje. En `provide_info`, los argumentos
-  nuevos van en una operación de la tool pendiente y el código ignora su `certainty`. Esto
-  cubre solo los argumentos de una tool ya pendiente; en la respuesta a una aclaración,
-  `certainty` sí cuenta (D3). Los valores de `act` están fijados en D3.
+  el modelo clasifica. Ausente = no dicho en este mensaje. Cada campo de tipo lista llega en
+  tres cubetas opcionales: `attendees` (la lista que el usuario dio; reemplaza),
+  `attendees_add` (nombres que pidió agregar) y `attendees_remove` (nombres que pidió
+  quitar). Sin las dos últimas, el campo se comporta como antes de la enmienda. En
+  `provide_info`, los argumentos nuevos van en una operación de la tool pendiente y el código
+  ignora su `certainty`. Esto cubre solo los argumentos de una tool ya pendiente; en la
+  respuesta a una aclaración, `certainty` sí cuenta (D3). Los valores de `act` están fijados
+  en D3.
 - **Motivo:** el modelo transcribe los valores y solo clasifica la estructura (`act`, `tool`,
   `certainty`, `depends_on`) o convierte lenguaje a números (`month`, `relative_days`). Así un
   valor inválido o no dicho llega al validador en lugar de corregirse en silencio, y
   "urgente" se rechaza en vez de convertirse en un `high` válido (TASK.md líneas 166-168, 184
   y 504).
+- **Enmienda (2026-11-16) · operaciones sobre listas:** cada campo de tipo lista gana dos
+  cubetas, `<campo>_add` y `<campo>_remove`; el campo original conserva el significado de
+  reemplazo. Las cubetas se declaran por tipo de campo en el registro, no por tool: todo
+  campo lista las recibe (TASK.md línea 562).
+  - *Motivo:* con una reunión con Juan pendiente, "agrega a Ana" y "con Ana" llegaban ambos
+    como `attendees=["Ana"]`, y "quita a Juan" no podía expresarse (podía llegar como
+    `attendees=["Juan"]`, lo contrario de lo pedido). El verbo se perdía en el intérprete,
+    así que cualquier regla de fusión de D4 era una apuesta (TASK.md líneas 145 y 557). El
+    modelo no puede enviar la lista completa porque no ve los valores guardados
+    (`include_contents='none'`; `{pending?}` sin valores), ni vaciar un campo con nulo,
+    porque ADK descarta los nulos (`model_dump(exclude_none=True)`,
+    `utils/_schema_utils.py:260`, google-adk 2.14.1). Decidir si el usuario agrega, quita o
+    reemplaza es una clasificación, que D2 ya asigna al modelo; aquí la expresa al elegir
+    la cubeta, sin un enum nuevo.
+  - *Compatibilidad:* una interpretación sin cubetas significa lo mismo que antes; los
+    tests escritos solo con `attendees` siguen siendo válidos. Las cubetas son listas de
+    cadenas opcionales, como `attendees`: no añaden construcciones nuevas al esquema.
+  - *Descartadas:* reemplazar siempre y avisar del cambio, como limitación documentada (no
+    cubre "quita a Juan"); una verificación de palabras clave en código ("agrega",
+    "también"), que repite la regla por verbo descartada en D3 (P3) y contradice TASK.md
+    línea 109; un enum por campo (`attendees_op: replace|add|remove`), porque un mensaje
+    solo lleva una operación y "quita a Juan y agrega a Ana" no cabe; y una lista de
+    `{op, name}`, que cambia el tipo de `attendees`, invalida los tests escritos con una
+    lista de cadenas y añade una clasificación por elemento.
+  - *Entradas para D4 (D4 las decide):* quitar un nombre que no está guardado; un
+    `_remove` que vacía la lista (el campo pasa a faltante); agregar un nombre que ya está
+    (sin duplicar, sobre nombres normalizados); el anclaje aplica a cada nombre de cada
+    cubeta; y un turno que trae `attendees` junto con alguna cubeta, o el mismo nombre en
+    `_add` y `_remove`.
 - **Contexto y respuestas:** `include_contents='none'` + resumen `{pending?}` (tools
   pendientes, estado, campos faltantes y última pregunta; sin valores recopilados).
   Respuestas solo con plantillas: una llamada al LLM por turno. Temperatura y nivel de
@@ -56,18 +89,20 @@ no forma parte del repositorio.
   se define en D4); tabla de sinónimos en español e inglés para `priority` y `channel`.
 - **Solo para logs:** `ambiguity_reason` se registra y ninguna decisión lo lee; un test lo
   demuestra. Que el código llegue a usarlo requiere una decisión nueva.
-- **Umbral de fiabilidad (fase 0):** modelo base `gemini-3.5-flash-lite`. 19 escenarios (A,
+- **Umbral de fiabilidad (fase 0):** modelo base `gemini-3.5-flash-lite`. 23 escenarios (A,
   B, C, D, E, F, G, X —un valor de enum no permitido, como "urgente"—, pregunta informativa,
   día de la semana, el contraste del caso C —"Avísale a Carlos que el servidor ya está
   disponible", TASK.md línea 117—, el primer mensaje del caso G —TASK.md línea 424—,
   "Necesito reportar que el servidor está caído" —TASK.md línea 113—, tres respuestas a una
   aclaración: "las dos", "solo avísale" y "no sé, lo que sea", y tres sondas sobre una
-  aclaración de dos candidatas: "sí", "No, la reunión no" y el mensaje del caso C repetido)
-  × 3 redacciones × 3 corridas = 171 llamadas solo al intérprete (prueba de humo: 19). En B,
-  F, G, las tres respuestas y las tres sondas se evalúa el segundo mensaje con un `{pending?}`
-  escrito a mano. Se juzga por lo que haría el código, no por el JSON exacto (C pasa si el
-  código preguntaría, la pregunta lista `send_notification` y `schedule_meeting`, y nada se
-  ejecuta).
+  aclaración de dos candidatas: "sí", "No, la reunión no" y el mensaje del caso C repetido,
+  y cuatro de lista con una reunión con Juan pendiente: "agrega a Ana", "quita a Juan",
+  "con Ana" y "quita a Juan y agrega a Ana")
+  × 3 redacciones × 3 corridas = 207 llamadas solo al intérprete (prueba de humo: 23). En B,
+  F, G, las tres respuestas, las tres sondas y los cuatro de lista se evalúa el segundo
+  mensaje con un `{pending?}` escrito a mano. Se juzga por lo que haría el código, no por el
+  JSON exacto (C pasa si el código preguntaría, la pregunta lista `send_notification` y
+  `schedule_meeting`, y nada se ejecuta).
   - *Con P1 (D3):* una operación `plausible` de más en un escenario claro es un desacierto,
     porque el código preguntaría; nunca es un fallo crítico. Cuenta además para el disparador
     de D3. Cada escenario claro (lista en D3) debe llegar a R2 o R3 en ≥ 7/9.
@@ -78,11 +113,16 @@ no forma parte del repositorio.
     que "No, la reunión no" nunca inicie `schedule_meeting`. Cada una pasa con ≥ 7/9, con el
     mismo fallo crítico. Se anota además cuántas veces el modelo devuelve operaciones con
     `reject` o `cancel`, y cuántas "sí" llega con las dos tools `explicit`.
+  - *Listas:* se espera "agrega a Ana" → Ana solo en `attendees_add`; "quita a Juan" →
+    Juan solo en `attendees_remove`; "con Ana" → Ana solo en `attendees`; y "quita a Juan
+    y agrega a Ana" → Juan en `attendees_remove` y Ana en `attendees_add`. Cada uno pasa
+    con ≥ 7/9. Fallo crítico: un nombre que el usuario pidió quitar llega en `attendees` o
+    en `attendees_add`. Cualquier otra cubeta equivocada es un desacierto.
   - *Fallo de forma:* `ValidationError`, salida vacía, o un objeto anidado (`args`, `date`,
     `time`) vacío cuando el mensaje sí traía ese dato. *Fallo crítico:* el código habría
     ejecutado algo o aceptado un valor no dicho. *Desacierto:* cualquier otro resultado
     distinto del esperado.
-  - Se sigue adelante con menos de 3/171 fallos de forma, ≥ 85 % de aciertos, A, C y G en
+  - Se sigue adelante con menos de 3/207 fallos de forma, ≥ 85 % de aciertos, A, C y G en
     ≥ 7/9, cada escenario claro en ≥ 7/9 y ningún escenario con 2 o más fallos críticos.
   - Un escenario con ≥ 2/9 fallos críticos → mejorar descripciones (≤ 2 h) y, si persiste,
     probar `gemini-3.8-flash` (confirmar antes que su cuota gratuita alcanza); si aun así
@@ -92,7 +132,7 @@ no forma parte del repositorio.
   - Son umbrales para detectar pronto un esquema roto, no una medida estadística. Revisar los
     límites reales en `https://aistudio.google.com/rate-limit` antes de la corrida completa.
 - **Precisa el repliegue de D1:** el híbrido (`report_request`) se activa solo por fallos de
-  forma (≥ 3/171 o un patrón repetido, tras ≤ 1 h simplificando el esquema). Los fallos de
+  forma (≥ 3/207 o un patrón repetido, tras ≤ 1 h simplificando el esquema). Los fallos de
   comprensión se corrigen con descripciones o con otro modelo, no con el híbrido.
 - **Descartadas:** S1, texto crudo plano (el código acaba haciendo trabajo de lenguaje, no
   hay dónde expresar la dependencia del caso E y los campos de distintas tools comparten
@@ -100,9 +140,12 @@ no forma parte del repositorio.
   detecta); S3, citas de evidencia (la cita puede existir y el valor ser derivado, como un
   título sacado de la descripción en el caso A, y una cita mal copiada obliga a volver a
   preguntar). De S3 se conservan `confirms_tool` y `ambiguity_reason`.
-- **Pendiente:** D4, anclaje de nombres duro o blando y reglas de fusión; D7, confirmación,
-  reglas del veto de `confirms_tool` y números no escritos como cifras; D8, regla de
-  `depends_on`.
+- **Pendiente:** D4, anclaje de nombres duro o blando y reglas de fusión (para las listas
+  ya hay un marcador que leer: las cubetas `_add` y `_remove` de la enmienda; D4 fija las
+  reglas de borde) [resuelto en D4]; D7, confirmación, reglas del veto de `confirms_tool` y números no
+  escritos como cifras; D8, regla de `depends_on`. Sin asignar: un posible marcador de
+  "instancia nueva" para "crea otro ticket" con un ticket pendiente (misma causa: la
+  palabra "otro" se pierde en el intérprete); no forma parte de esta enmienda.
 
 **D1.1 · Anfitrión del ciclo por turno: un nodo dinámico sobre el runtime de nodos** (2026-11-16)
 
@@ -361,7 +404,7 @@ no forma parte del repositorio.
   no lo distingue de una respuesta: se resuelve a `send_notification` y la regla de fusión
   decide si "Pedro" reemplaza a "Carlos", TASK.md línea 413), la regla de fusión de los
   argumentos guardados, y "crea otro ticket" con un ticket pendiente (la compuerta lo fusiona
-  con el pendiente); D7, qué tools quedan exentas de confirmación (nunca en el turno que
+  con el pendiente) [resuelto en D4]; D7, qué tools quedan exentas de confirmación (nunca en el turno que
   resuelve una aclaración), la confirmación de planes y la diferencia entre `reject` y
   `cancel`; D8, hereda que el plan de una aclaración es lineal, en el orden de las candidatas
   y con la dependencia que ya traían. Sin asignar: nombres de tools como enum cerrado o cadena
@@ -371,3 +414,112 @@ no forma parte del repositorio.
   pasos); `asked_turn` e `id` de la aclaración, que ninguna regla lee; y dónde vive un
   registro "archivado". Revisión adversarial de la aclaración: hecha el 2026-11-16. La marca
   "provisional" se quita cuando las tres respuestas y las tres sondas pasen la fase 0.
+
+**D4 · Fusión de argumentos entre turnos y anclaje duro de nombres** (2026-11-16)
+
+- **Decisión:**
+  1. *Forma.* D4 son dos pasos en Python puro dentro del reductor: anclar los argumentos que
+     llegan contra el mensaje actual y fusionarlos con los guardados. Devuelve los argumentos
+     nuevos, los cambios, los nombres rechazados y las notas. No valida, no lee registros
+     archivados y no importa ADK. Cada regla se declara por tipo de campo en el registro
+     (`text`, `word`, `int`, `person`, `date`, `time`, `person_list`), nunca por tool.
+  2. *Ausente.* Un campo está ausente si falta o si es una cadena en blanco, una lista vacía o
+     un objeto vacío. Lo mismo vale para cada componente de una fecha o de una hora y para
+     cada elemento de una lista. El cero es un valor. Un nombre repetido dentro de una lista
+     se guarda una vez. Lo ausente nunca cambia lo guardado. Un escalar no se puede vaciar,
+     solo reemplazar.
+  3. *Anclaje duro.* En los campos `person` y en cada nombre de cada cubeta de lista se toman
+     las palabras del nombre que no están en la lista de exclusión. Debe quedar al menos una,
+     y cada una debe ser una palabra completa del mensaje actual (NFKD, sin marcas
+     combinantes, `casefold`). La lista de exclusión es exactamente: yo, mi, me, tu, ti, te,
+     el, ella, usted, ustedes, nosotros, nosotras, ellos, ellas, le, les, lo, la, los, las,
+     se, nos. El nombre que falla se descarta él solo y se anota en el log. Ningún otro tipo
+     de campo se ancla.
+  4. *Una vez, al entrar.* El anclaje corre en el turno en que llega el valor, contra el
+     mensaje de ese turno, incluidas las candidatas de una aclaración. Un valor guardado
+     nunca se vuelve a anclar.
+  5. *Escalares, fechas y horas.* Gana el último valor, entero. Dos valores son iguales si
+     coinciden tras la misma normalización que los nombres, sin espacios en los extremos;
+     entonces nada cambia y se conserva la grafía guardada. Los componentes de fecha y hora
+     se guardan como se dijeron; la conversión a ISO, los valores por defecto y la
+     aritmética de fechas son de D5.
+  6. *Listas.* Se parte de `<campo>` si llegó y, si no, de la lista guardada; se agrega
+     `<campo>_add`; después se quita `<campo>_remove`, comparando el nombre normalizado
+     entero. Un resultado vacío deja el campo ausente. Las listas se comparan como conjuntos.
+     Tres casos producen una nota: quitar un nombre que no está y agregar uno que ya está,
+     que no cambian nada; y el mismo nombre en `_add` y `_remove`, que queda fuera.
+  7. *Validez.* La fusión ignora la validez y guarda las palabras del usuario. Un valor nuevo
+     inválido reemplaza a uno guardado válido; D5 lo reporta y la operación no puede
+     ejecutarse hasta que se corrija.
+  8. *Cambios.* Por campo: `fill` (ausente → valor), `overwrite` (valor → otro valor; incluye
+     todo cambio a una lista guardada) o `clear` (una lista que queda vacía), con el valor
+     anterior y el nuevo. No se guarda la procedencia; la lista de cambios del turno va al
+     log.
+  9. *Respuestas.* Se muestra cada cambio (anterior → nuevo en un `overwrite`; la lista
+     anterior en las listas) y cada nota. Si se rechazó algún nombre, una línea fija lo dice
+     sin mostrar el nombre. Un flujo que nace de las candidatas de una aclaración lista
+     todos los valores que heredó.
+  10. *Valores del código* (`ticket_id`, resultados): viven fuera de `args`. La fusión solo
+      escribe campos del contrato.
+
+  *Lo que D4 exige a D7* (vinculante; D7 puede añadir, no quitar):
+  - La fusión corre antes de evaluar un `confirm`. La compuerta de D3 no lo hace hoy:
+    `confirm` cae en "Resto" (D3, *Compuerta de entrada*, paso 3).
+  - Un "sí" cuenta solo en un turno cuya fusión no devolvió nada: ningún cambio, ningún
+    nombre rechazado y ninguna nota.
+  - Un turno con un `overwrite`, un `clear`, un nombre rechazado o una nota nunca ejecuta.
+- **Motivo:** TASK.md línea 145 pide conservar lo recopilado y actualizarlo con información
+  nueva: lo ausente no borra (regla 2) y lo nuevo reemplaza (reglas 5 y 6). La línea 184
+  prohíbe inventar: un nombre se copia, no se parafrasea, así que el código puede exigir sus
+  palabras en el mensaje. Las líneas 186-200 piden identificar el problema: "40" y "25:90"
+  se guardan como se dijeron para que D5 nombre ambos (regla 7). Las líneas 276-286 atan el
+  "sí" a una operación identificada: si llega con un cambio, un rechazo o una nota, ya no
+  responde a lo que se mostró. La línea 413 pide no mezclar: D3 archiva el flujo anterior,
+  la fusión no lee archivados y un nombre solo entra si está escrito en el mensaje nuevo.
+  - *Hechos de D2:* el modelo no ve los valores guardados (`include_contents='none'`;
+    `{pending?}` sin valores), así que la fusión la hace el código. Los nulos no llegan al
+    núcleo (`workflow/_llm_agent_wrapper.py:410` → `utils/_schema_utils.py:260`, google-adk
+    2.14.1), pero `""`, `[]`, `{}` y `0` sí: de ahí la regla 2. El verbo de una lista llega
+    en la cubeta: de ahí la regla 6.
+  - *Lista de exclusión:* nunca elige una acción ni un significado; solo puede rechazar un
+    valor, y un rechazo cuesta una pregunta.
+  - *Quitar al final:* cuando el modelo se contradice, el código se queda con quitar.
+- **Precisa D3:** D3 guarda las candidatas de una aclaración "tal como se interpretaron". Por
+  la regla 4 se guardan después del anclaje: el mensaje que resuelve ("solo avísale") ya no
+  trae los nombres. El texto de D3 no se edita.
+- **Descartadas:** anclaje blando (guarda un nombre inventado, que se ejecuta si el usuario
+  confirma sin leer); coincidencia por subcadena ("Ana" está dentro de "mañana"); un
+  directorio de personas (regla de negocio, D5); preguntar siempre ante un cambio (cada
+  corrección cuesta un turno, incluso "mejor media"); `source_turn` (ninguna regla lo lee);
+  fusionar componentes de fecha u hora (10:30 y luego "a las 11" da 11:30, válido y
+  equivocado); la excepción para día, mes y año (tres casos laterales: completar el mes
+  cuenta como cambio, "mejor el viernes 27" pierde el mes y un año viejo sobrevive);
+  guardar ISO al entrar ("40 de noviembre" no cabe y D4 haría aritmética de fechas);
+  conservar el valor anterior si el nuevo es inválido (seguiría ejecutable un valor que el
+  usuario ya cambió, y la fusión tendría que conocer la validez); agregar al final en las
+  listas (un nombre en ambas cubetas dejaría invitado a quien se pidió quitar); y reglas
+  especiales para los dos traspasos de D3 (leen la intención en un valor: "Avísale a Pedro,
+  no a Carlos" es una corrección y perdería el mensaje).
+- **Limitaciones para el README:** el código solo comprueba nombres: la fusión no detecta un
+  título, prioridad, canal, duración, fecha u hora inventados; en el caso A (TASK.md línea
+  304), un título derivado de la descripción depende del escenario A de la fase 0 y del
+  resumen de confirmación. Un nombre debe escribirse en el mismo mensaje ("asígnalo a él" y
+  "avísame" no anclan). El anclaje prueba que una palabra se dijo, no que sea una persona ni
+  que esté en el campo correcto. Un apodo que el modelo normaliza se rechaza. Un nombre
+  igual a un pronombre de la lista no puede introducirse. "Quita a Juan" no coincide con
+  "Juan Pérez". "Crea otro ticket" con un ticket pendiente actualiza el pendiente. Un
+  destinatario nuevo durante una aclaración conserva el mensaje guardado. Dos valores para
+  un mismo campo en un solo mensaje no pueden detectarse. Un escalar no se puede vaciar. La
+  lista de exclusión solo cubre el español.
+- **Pendiente:** D7, sin decidir aquí: si alguna tool queda exenta de confirmación y, por
+  tanto, si un turno solo con `fill` puede ejecutar; que un plan necesita una confirmación
+  que liste los valores de cada paso, porque cambiar el responsable del ticket no toca el
+  destinatario de la notificación; si el hash de confirmación cubre los argumentos guardados
+  o los valores normalizados que se muestran; un `reject` que trae argumentos; y un "sí,
+  pero…" que el modelo devuelve como `confirm` sin argumentos. D5: valores por defecto de
+  una fecha parcial, tipos de fecha mezclados, quién reporta dos argumentos que no
+  concuerdan y `duration_minutes=0`. D8: un argumento que el modelo coloca en el paso
+  equivocado de un plan lo quita el filtro por contrato de D2 y nadie lo avisa. Sin
+  asignar: anclar las palabras de `priority` y `channel`; se revisa si la fase 0 muestra
+  que el modelo cambia esas palabras. Para leer la fase 0: un número que el mensaje no
+  contenía cuenta como fallo crítico.
