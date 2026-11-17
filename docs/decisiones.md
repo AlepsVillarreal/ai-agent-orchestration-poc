@@ -1258,7 +1258,7 @@ autodecidida por el orquestador; revisable
     `E1` trae `depends_on`, así que la inferencia de D8.4 no hizo falta; `G2` trae
     `confirms_tool`; ningún número que el mensaje no contuviera.
 - **Pendiente:** si D33 cambia descripciones del esquema, el 0/23 y estas lecturas quedan
-  medidos con las anteriores; la tarea 19 dice con qué versión se midió cada cosa (D34).
+  medidos con las anteriores; la tarea 19 dice con qué versión se midió cada cosa (D34). [resuelto en D52]
 
 **D33 · Caso C con el modelo real: el camino de D2, en la tarea 10c** (2026-11-17) · decidida
 por el autor
@@ -1268,7 +1268,7 @@ por el autor
   `ambiguity_reason`, en `core/interpretation.py`), sin prompt extenso ni reglas por palabra
   clave. Después vuelve a medir con el modelo real: 5 llamadas propuestas (`C1`, `N1`, `S3`,
   `A1` y `E1`; D34) y mínimo `C1`, `N1` y `S3`, con el número aprobado por el autor al llegar
-  a la 10c. Pasa si, por las filas de D3, `C1` cae en R4 o R5 y la pregunta lista la
+  a la 10c [resuelto en D51]. Pasa si, por las filas de D3, `C1` cae en R4 o R5 y la pregunta lista la
   notificación y la reunión; `N1` cae en R2 solo con `send_notification`; `S3` no resuelve a
   ninguna candidata; y `A1` y `E1` dan lo mismo que su interpretación fija.
   - Si falla `C1`, `N1`, `A1` o `E1`, se revierten las descripciones y el caso C queda como
@@ -1315,7 +1315,7 @@ por el autor
 por el orquestador; revisable
 
 - **Decisión:** la 10c propone al autor 5 llamadas (`C1`, `N1`, `S3`, `A1` y `E1`), con
-  mínimo `C1`, `N1` y `S3`; el autor aprueba el número al llegar a la 10c. F0.1 vale también
+  mínimo `C1`, `N1` y `S3`; el autor aprueba el número al llegar a la 10c [resuelto en D51]. F0.1 vale también
   para ellas: un fallo de forma detiene el trabajo y se pregunta al autor. Si el autor aprueba
   solo 3, la tarea 19 dice que el 0/23 y las lecturas favorables de D32 se midieron con las
   descripciones anteriores.
@@ -1912,3 +1912,117 @@ revisable
     tool falsa lo fija (ronda 2, nota 1); puede ir con la 11, que toca ese bucle.
   - *Tamaño:* `core/turn.py` tiene 425 líneas (ronda 2, nota 2).
   - Sin idempotencia tras ejecutar (D46, *Pendiente*; tarea 11).
+
+**D51 · Tarea 10c: dos rondas como mucho, 10 llamadas y 30 peticiones** (2026-11-17) ·
+decidida por el autor
+
+- **Decisión:** la 10c mide con 5 llamadas reales por ronda, una por id: `C1`, `N1`, `S3`, `A1`
+  y `E1`, las que proponía D34. Opción (b) del hallazgo 4 de la revisión del backlog
+  (`backlog-06.md`), ampliada en la segunda parada de la 10c: si en la ronda 1 falla alguno de
+  `C1`, `N1`, `A1` o `E1`, sin fallo de forma ni corrida detenida, hay una ronda 2 con los
+  mismos 5 ids y los mismos tres textos, dentro de la hora. Si la ronda 2 también falla, se
+  revierten las descripciones. Si solo falla `S3`, no hay ronda 2; no hay ronda 3.
+  - *Techo:* 10 llamadas en la tarea; una llamada cuenta aunque falle. El arnés no cambia (D28,
+    D30): cada llamada puede ser hasta 3 peticiones HTTP, con techo de 15 por ronda y 30 en
+    total. La nota de cada ronda cuenta llamadas y peticiones (llamadas más líneas de reintento
+    en stderr, D31).
+  - *Corrida detenida:* sin reintento ni `--resume`; otra llamada necesita otra aprobación.
+  - *Nota (y), confirmada:* ningún paso con `gemini-3.8-flash` (D33, *Precisa D2*).
+- **Motivo:** las descripciones las comparten los 23 escenarios, así que `A1` y `E1` vigilan
+  el caso A y el caso E (TASK.md líneas 296 y 378) junto al caso C y su contraste (líneas
+  338-355 y 117). La ronda 2 da al ajuste un intento más sin pasar de la hora ni gastar más
+  cuota de la capa gratuita: el foco es la orquestación, no el modelo (línea 597).
+- **Precisa D33:** D33 revertía tras un solo intento; con (b), tras la ronda 2. La primera
+  pregunta decía hasta 2 peticiones por llamada, por D1.2, que es el reintento del intérprete
+  del agente y no el del arnés; el autor fijó 3. El texto de D33 no se edita.
+- **Descartadas:** (a) un intento y, si falla, limitación (D33 tal como está); (c) 2 llamadas
+  (`C1`, `N1`) con `gemini-3.8-flash` antes de declarar la limitación.
+
+**D52 · Resultado de la 10c: el caso C queda como limitación con `gemini-3.5-flash-lite`**
+(2026-11-17)
+
+- **Decisión:** por D33 y D51 se revierten los tres textos: `core/interpretation.py` queda
+  igual que en `26b054c`, con los de la 06. El caso C (TASK.md líneas 338-355) queda como
+  limitación documentada con `gemini-3.5-flash-lite`. Dos rondas, cada una con su nota del
+  mismo nombre en `phase0/runs/`:
+  - `20261117T164006Z-gemini-3.5-flash-lite.jsonl` (ronda 1): 5 llamadas, 6 peticiones HTTP
+    (un 503 que absorbió el reintento del arnés) y 0 fallos de forma. `C1` en R2 → `ronda_2`.
+    Las 5 salidas son iguales, campo por campo, a las de la 06.
+  - `20261117T164255Z-gemini-3.5-flash-lite.jsonl` (ronda 2): 5 llamadas, 5 peticiones y 0
+    fallos de forma. `C1` otra vez en R2 → `revertir`.
+
+  En total, 10 de 10 llamadas y 11 de 30 peticiones. Ninguna corrida se detuvo y el gate de
+  F0.1 no saltó (D34). El juicio es del juez de D53; `test_10c_runs_as_recorded` lo reproduce
+  sin modelo. Los textos probados están literales en cada nota.
+- **Lo que ve el usuario:** con el mensaje del caso C, el modelo devuelve una sola
+  `send_notification` `explicit`, sin `schedule_meeting` ni `ambiguity_reason`. El agente
+  inicia la notificación y pide el canal en vez de aclarar; la reunión nunca se ofrece (D3,
+  *Limitación para el README (omisión)*). No ejecuta varias tools por asociación (línea 353) y
+  nada corre sin la confirmación de D7.1, pero no pide la aclaración de la línea 355.
+- **Sin cambio en las dos rondas:** `N1` en R2, solo con `send_notification` y sin canal
+  inventado (línea 117); `A1` en R2 sin `title` inventado (líneas 184 y 304); `E1` en R3 con
+  `create_ticket` y `send_notification` `explicit` y con `depends_on` (línea 378).
+- **`S3`:** con los textos vigentes cae en la regla 2 de la *Lectura de la respuesta* de D3 y
+  resolvería la aclaración a la notificación (06 y ronda 1), que D2 (*Sondas*) llama fallo
+  crítico; nada se ejecuta (D7.1). Solo pasó en la ronda 2 (regla 5: `send_notification`
+  `explicit` y `schedule_meeting` `plausible`), con textos ya revertidos. La 13 parte de la
+  regla 2.
+- **Con qué textos se midió cada cosa (D34):** el 0/23 de D32 y sus lecturas, con los de la
+  06, que son los vigentes; `C1`, `N1`, `S3`, `A1` y `E1` de la 10c, con los de su ronda.
+- **Motivo:** D33 manda revertir si falla `C1`, y D51 lo aplica tras la ronda 2. Solo
+  descripciones cortas y genéricas podían intentarlo, sin un prompt que decida ni reglas por
+  palabra clave (TASK.md líneas 109 y 587). Ni una pista cercana a la forma del caso C
+  ("something it says will happen") hizo que el modelo ofreciera la reunión sin nada
+  pendiente (revisión de la tarea 10c, ronda 1, nota 3). Should-fix 1 de esa revisión: la
+  limitación queda explícita.
+- **Para la defensa** (preguntas 3 y 8 de §9, TASK.md líneas 555 y 560): el fallo es de
+  lectura del modelo, no de la tabla. Con las dos lecturas reportadas, el núcleo cae en R4 o
+  R5 y pregunta (`test_fixed_outputs_pass`, con el fijo de `C1`).
+- **Pendiente:** la 17 lo dice en la transcripción de C y la 20 en el README (D3, *Limitación
+  (omisión)*); la 19 lo usa en las preguntas 3 y 8 y dice con qué textos se midió cada cosa.
+  El techo de la 10c está agotado: otra llamada real necesita una aprobación nueva del autor.
+
+**D53 · Tarea 10c: `--only` en el arnés y el juez del caso C** (2026-11-17) · autodecidida por
+el orquestador; revisable
+
+- **Decisión:** la 10c cierra con D51 y D52. Lo demás no cambia lo que ve el usuario, cuándo se
+  ejecuta una tool ni qué se guarda, así que va en una línea cada uno (regla del autor desde la
+  tarea 07):
+  - *`--only ID,…`* (`select_scenarios`, `phase0/run.py`): un filtro sin lógica nueva de
+    veredicto (decisión del autor, hallazgo 10 de `backlog-06.md`). Conserva el orden de
+    `SCENARIOS` y el registro pendiente de cada escenario; sin `--run` lista solo esos ids.
+  - *Errores de `--only`:* un id desconocido o repetido, una lista vacía o `--only` con
+    `--resume` → código 2, antes de leer `.env`, de llamar o de crear un archivo.
+  - *Informe:* da los fallos de forma sobre los ids pedidos y "Sin veredicto de F0.1" (la rama
+    que ya tenía `format_report`; nota (z)).
+  - *Juez* (`tests/case_c_judge.py`; `uv run python -m tests.case_c_judge RUTA [--round 1|2]`):
+    pasa cada salida guardada de `C1`, `N1`, `A1` y `E1` por `handle_turn` y
+    `filter_by_registry` reales (D3, *Método*) y da el resultado de la ronda (`pasa`,
+    `solo_s3`, `ronda_2` o `revertir`). Vive en `tests/` porque el arnés no da veredictos y
+    `core/` no cambia en la 10c.
+  - *`S3`:* el juez lleva una copia de la *Lectura de la respuesta* de D3 (reglas 1–5) hasta
+    que la 13 la implemente en el núcleo; después, el juez llama al núcleo.
+  - *Límites de los textos:* `test_certainty_texts_stay_short_and_generic` exige ≤ 250
+    caracteres, ASCII, sin nombres de tools ni palabras de los mensajes medidos, sin comillas
+    ni "then", y los mismos campos del esquema que midió F0.1. Hoy vigila los de la 06.
+- **Precisa D33:** "`A1` y `E1` dan lo mismo que su interpretación fija" se juzga por lo que
+  haría el código, no por el JSON exacto (D2): `A1` y `N1` en R2 con su tool y el mismo
+  `missing` que su fijo; `E1` en R3 con las dos tools `explicit`. `depends_on` se informa y no
+  decide (D8.4). El texto de D33 no se edita.
+- **Motivo:** el resultado lo decide el código del núcleo sobre salidas guardadas, no una
+  lectura a mano, y se puede repetir sin modelo (D3, *Método*). El test de los textos impide
+  que el ajuste se vuelva un prompt que decide o una regla por palabra clave (TASK.md líneas
+  109 y 587).
+- **Lo prueban:** `test_only_calls_just_the_ids_asked`,
+  `test_only_rejects_unknown_or_repeated_ids`, `test_only_and_resume_do_not_mix`,
+  `test_only_listing_calls_nothing`, `test_fixed_outputs_pass`,
+  `test_06_run_reproduces_the_hand_reading`, `test_judge_edges`, `test_round_outcomes`,
+  `test_10c_runs_as_recorded` y `test_certainty_texts_stay_short_and_generic`.
+- **Pendiente:**
+  - *Ids ausentes:* el juez no juzga los ids que faltan en el archivo, así que una corrida
+    detenida puede dar `pasa` o `solo_s3`; el orden "corrida detenida → fallo de forma → juez"
+    lo sostiene el procedimiento. Si la 13 lo reutiliza, la nota dice cuántos ids se juzgaron
+    (revisión de la tarea 10c, ronda 1, nota 4).
+  - *Copia de D3:* cuatro actos sueltos (`cancel` en la regla 1, `reject` y `provide_info` en
+    la 4, `provide_info` en la 2) no tienen test propio; la 13 pone un caso por acto al
+    reemplazar la copia (ronda 3, nota 1).
