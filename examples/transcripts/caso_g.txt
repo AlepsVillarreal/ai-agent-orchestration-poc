@@ -1,0 +1,11 @@
+> Envía un correo a Carlos para informarle que el ticket quedó resuelto
+Anoté a quién se envía: Carlos.
+Anoté el mensaje: el ticket quedó resuelto.
+Anoté el canal: correo.
+Voy a enviar una notificación con estos datos:
+- A quién se envía: Carlos
+- El mensaje: el ticket quedó resuelto
+- El canal: correo
+¿Confirmas que quieres enviar una notificación? Responde sí o no.
+> Sí, hazlo
+Listo: envié la notificación NTF-E145B885.

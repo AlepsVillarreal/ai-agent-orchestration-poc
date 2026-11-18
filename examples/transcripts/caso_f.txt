@@ -1,0 +1,7 @@
+> Agenda una reunión con Juan
+Anoté los asistentes: Juan.
+Para programar una reunión necesito el título, la fecha, la hora y la duración en minutos.
+> Mejor crea un ticket para revisar el servidor
+No voy a programar una reunión; descarté lo que tenía pendiente.
+Anoté el título: revisar el servidor.
+Para crear un ticket necesito la descripción, la prioridad y a quién se asigna.

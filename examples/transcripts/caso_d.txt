@@ -1,0 +1,10 @@
+> Agenda una reunión el 40 de noviembre a las 25:90
+Anoté la fecha: día 40, mes 11.
+Anoté la hora: 25:90.
+La fecha indicada no existe.
+La hora está fuera del formato válido.
+Para programar una reunión necesito el título, la fecha, la hora, la duración en minutos y los asistentes.
+> El 20 de noviembre a las 10:30
+Cambié la fecha: día 40, mes 11 → día 20, mes 11.
+Cambié la hora: 25:90 → 10:30.
+Para programar una reunión necesito el título, la duración en minutos y los asistentes.

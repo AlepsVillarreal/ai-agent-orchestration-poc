@@ -1,0 +1,3 @@
+> Necesito crear un ticket porque el servidor está caído
+Anoté la descripción: el servidor está caído.
+Para crear un ticket necesito el título, la prioridad y a quién se asigna.

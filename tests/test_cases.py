@@ -6,8 +6,10 @@ and checks each bullet of the case's "Comportamiento esperado" against the liter
 state stored in the session and the calls to each mock tool. The node's clock is fixed at `NOW`
 (Tuesday 2026-11-17, 09:00), so no result depends on the day the suite runs.
 
-The last two tests tie `examples/inputs/` to the same fixed turns: each file holds, one per
-line, the messages of its case, and runs through the CLI's own loop (`assistant.cli.chat`).
+The two tests after them tie `examples/inputs/` to the same fixed turns: each file holds, one
+per line, the messages of its case, and runs through the CLI's own loop (`assistant.cli.chat`).
+The last one ties `examples/transcripts/` (task 17, recorded with the real model) to those
+inputs: every line echoed, in order, each with a reply, and no failed model call.
 """
 
 import dataclasses
@@ -48,6 +50,7 @@ from tests.node_helpers import (
 )
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples" / "inputs"
+TRANSCRIPTS = EXAMPLES.parent / "transcripts"
 
 TICKET_QUESTION = "Para crear un ticket necesito el título, la prioridad y a quién se asigna."
 CLARIFICATION_QUESTION = "¿Quieres enviar una notificación, programar una reunión, o ambas?"
@@ -225,7 +228,7 @@ async def test_case_b_through_the_node(monkeypatch):
 
 
 # Case C (a) (TASK.md lines 338-355): the ambiguous message stores a clarification and asks it,
-# and nothing runs "solamente por asociación semántica" (line 352).
+# and nothing runs "solamente por asociación semántica" (line 353).
 async def test_case_c_asks_for_clarification(monkeypatch):
     fail_every_tool(monkeypatch)
     fake = ScriptedLlm(script=script_of("C1"))
@@ -932,3 +935,29 @@ async def test_example_inputs_run_through_the_cli_loop(monkeypatch, name):
     assert '"act"' not in text  # nothing from the interpreter
     expected = {tool: EXAMPLE_RUNS[name].get(tool, 0) for tool in TOOLS}
     assert call_counts(calls) == expected
+
+
+# Task 17 (decision D): the transcripts recorded with the real model are of the current inputs,
+# complete (every line was sent and answered) and without a failed model call. No model, no
+# network.
+def test_transcripts_echo_their_inputs():
+    assert sorted(path.name for path in TRANSCRIPTS.iterdir()) == sorted(
+        [*EXAMPLE_INPUTS, "README.md"]
+    )
+    for name in EXAMPLE_INPUTS:
+        sent = (EXAMPLES / name).read_text(encoding="utf-8").splitlines()
+        text = (TRANSCRIPTS / name).read_text(encoding="utf-8")
+        assert text.endswith("\n"), name  # the last reply was not cut
+        lines = text.splitlines()
+        assert [line for line in lines if line.startswith("> ")] == [f"> {s}" for s in sent], name
+        # Each echoed message is followed by at least one reply line (review 17-1, finding 1).
+        for index, line in enumerate(lines):
+            if line.startswith("> "):
+                following = lines[index + 1] if index + 1 < len(lines) else "> "
+                assert not following.startswith("> "), (name, line)
+        for line in lines:
+            assert '"act"' not in line, name  # nothing from the interpreter (D1.1)
+            assert replies.MODEL_UNAVAILABLE not in line, name
+            assert replies.NOT_UNDERSTOOD not in line, name
+            assert "AIza" not in line, name
+            assert "/Users/" not in line, name  # no local path (step 3.1 of brief 17)

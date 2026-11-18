@@ -1,0 +1,24 @@
+> Crea un ticket de prioridad alta para Carlos y mándale una notificación por email cuando esté creado
+Anoté la prioridad: alta.
+Anoté a quién se asigna: Carlos.
+Anoté a quién se envía: Carlos.
+Anoté el canal: email.
+Para crear un ticket necesito el título y la descripción. Para enviar una notificación necesito el mensaje.
+> El título es Servidor caído, la descripción es que el servidor de producción no responde, y el mensaje: ya se registró la falla
+Anoté el título: Servidor caído.
+Anoté la descripción: el servidor de producción no responde.
+Anoté el mensaje: ya se registró la falla.
+Voy a crear un ticket con estos datos:
+- El título: Servidor caído
+- La descripción: el servidor de producción no responde
+- La prioridad: alta
+- A quién se asigna: Carlos
+Voy a enviar una notificación con estos datos:
+- A quién se envía: Carlos
+- El mensaje: ya se registró la falla
+- El canal: correo
+El mensaje llevará al final el número de ticket.
+¿Confirmas que quieres crear un ticket y enviar una notificación? Responde sí o no.
+> Sí, adelante
+Listo: creé el ticket TCK-41C53663.
+Listo: envié la notificación NTF-137B22A3.

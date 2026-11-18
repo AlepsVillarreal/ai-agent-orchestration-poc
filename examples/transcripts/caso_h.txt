@@ -1,0 +1,33 @@
+> Crea un ticket titulado Servidor caído: el servidor de producción no responde, prioridad alta, asígnalo a Carlos
+Anoté el título: Servidor caído.
+Anoté la descripción: el servidor de producción no responde.
+Anoté la prioridad: alta.
+Anoté a quién se asigna: Carlos.
+Voy a crear un ticket con estos datos:
+- El título: Servidor caído
+- La descripción: el servidor de producción no responde
+- La prioridad: alta
+- A quién se asigna: Carlos
+¿Confirmas que quieres crear un ticket? Responde sí o no.
+> Crea un ticket titulado Servidor caído: el servidor de producción no responde, prioridad alta, asígnalo a Carlos
+Voy a crear un ticket con estos datos:
+- El título: Servidor caído
+- La descripción: el servidor de producción no responde
+- La prioridad: alta
+- A quién se asigna: Carlos
+¿Confirmas que quieres crear un ticket? Responde sí o no.
+> Sí, créalo
+Listo: creé el ticket TCK-E129F310.
+> Crea un ticket titulado Servidor caído: el servidor de producción no responde, prioridad alta, asígnalo a Carlos
+Anoté el título: Servidor caído.
+Anoté la descripción: el servidor de producción no responde.
+Anoté la prioridad: alta.
+Anoté a quién se asigna: Carlos.
+Voy a crear un ticket con estos datos:
+- El título: Servidor caído
+- La descripción: el servidor de producción no responde
+- La prioridad: alta
+- A quién se asigna: Carlos
+¿Confirmas que quieres crear un ticket? Responde sí o no.
+> Sí, créalo
+Ya creé el ticket TCK-E129F310 con estos mismos datos; no lo repetí.

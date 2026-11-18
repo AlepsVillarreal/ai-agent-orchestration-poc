@@ -1,0 +1,17 @@
+> Avísale a Carlos que mañana revisamos el servidor
+Anoté a quién se envía: Carlos.
+Anoté el mensaje: mañana revisamos el servidor.
+Para enviar una notificación necesito el canal.
+> Solo avísale
+Anoté el canal: Solo avísale.
+No reconozco el canal que indicaste; puede ser correo, SMS o push.
+Para enviar una notificación necesito el canal.
+> Por correo
+Cambié el canal: Solo avísale → correo.
+Voy a enviar una notificación con estos datos:
+- A quién se envía: Carlos
+- El mensaje: mañana revisamos el servidor
+- El canal: correo
+¿Confirmas que quieres enviar una notificación? Responde sí o no.
+> Sí, hazlo
+Listo: envié la notificación NTF-2A3DF8AC.

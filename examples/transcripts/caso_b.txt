@@ -1,0 +1,17 @@
+> Crea un ticket para revisar el problema de autenticación
+Anoté la descripción: revisar el problema de autenticación.
+Para crear un ticket necesito el título, la prioridad y a quién se asigna.
+> Alta, asígnalo a Carlos
+Anoté la prioridad: Alta.
+Anoté a quién se asigna: Carlos.
+Para crear un ticket necesito el título.
+> El título es Falla de autenticación
+Anoté el título: Falla de autenticación.
+Voy a crear un ticket con estos datos:
+- El título: Falla de autenticación
+- La descripción: revisar el problema de autenticación
+- La prioridad: alta
+- A quién se asigna: Carlos
+¿Confirmas que quieres crear un ticket? Responde sí o no.
+> Sí, créalo
+Listo: creé el ticket TCK-606E965B.
