@@ -2,6 +2,8 @@
 
 Agente conversacional construido con **Google ADK** que interpreta solicitudes en lenguaje natural, valida argumentos de forma determinística y orquesta la ejecución de herramientas (`create_ticket`, `schedule_meeting`, `send_notification`).
 
+Arquitectura (componentes, estados de una operación, ciclo de un turno y qué decide el LLM frente al código): [`docs/arquitectura.md`](docs/arquitectura.md).
+
 > 🚧 En construcción. Este README se ampliará con la arquitectura, decisiones técnicas y ejemplos de interacción.
 
 ## Requisitos
