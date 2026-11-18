@@ -203,7 +203,6 @@ confirmar:
 - `MOCK_FAIL` con el modelo real (D91, *Pendiente*): el fallo parcial del caso E se prueba con el
   modelo falso en `test_case_e_second_step_fails_through_the_node` y
   `test_case_e_first_step_fails_through_the_node`.
-- `adk web`.
 - Otros modelos.
 
 ## Secretos
