@@ -979,7 +979,7 @@ orquestador; revisable
   línea 526), y la traza conserva el detalle de un fallo del modelo para la tarea 06 (líneas
   471 y 580).
 - **Descartada:** subir el logger `google_adk` a CRITICAL (esconde fallos útiles).
-- **Pendiente:** revisar la decisión si las tareas 15 o 17 capturan stderr.
+- **Pendiente:** revisar la decisión si las tareas 15 o 17 capturan stderr. [resuelto en D93]
 
 **D23 · Redacción de las plantillas de fallo** (2026-11-16) · autodecidida por el
 orquestador; revisable
@@ -1995,9 +1995,10 @@ decidida por el autor
 - **Para la defensa** (preguntas 3 y 8 de §9, TASK.md líneas 555 y 560): el fallo es de
   lectura del modelo, no de la tabla. Con las dos lecturas reportadas, el núcleo cae en R4 o
   R5 y pregunta (`test_fixed_outputs_pass`, con el fijo de `C1`).
-- **Pendiente:** la 17 lo dice en la transcripción de C y la 20 en el README (D3, *Limitación
+- **Pendiente:** la 17 lo dice en la transcripción de C [resuelto en D93] y la 20 en el README (D3, *Limitación
   (omisión)*); la 19 lo usa en las preguntas 3 y 8 y dice con qué textos se midió cada cosa.
   El techo de la 10c está agotado: otra llamada real necesita una aprobación nueva del autor.
+  [resuelto en D93]
 
 **D53 · Tarea 10c: `--only` en el arnés y el juez del caso C** (2026-11-17) · autodecidida por
 el orquestador; revisable
@@ -3562,7 +3563,7 @@ hash** (2026-11-17) · autodecidida por el orquestador; revisable
     escrita de los fallos parciales y los reintentos (TASK.md línea 272) y del estado incierto
     (línea 451).
   - *Tarea 17:* la transcripción del caso E depende del `depends_on` que devuelva el modelo
-    (decisión F).
+    (decisión F). [resuelto en D93]
   - *`MOCK_FAIL` con el modelo real:* el fallo parcial solo se probó con el modelo falso y la
     variante `simulated` que usa `MOCK_FAIL` (D63, *Pendiente*).
 
@@ -3624,14 +3625,89 @@ autodecidida por el orquestador; revisable
   - *Caso F frente a la línea 403 (tareas 17 y 20):* tras "Agenda una reunión con Juan" la pregunta
     nombra los cuatro faltantes ("el título, la fecha, la hora y la duración en minutos"), no solo
     "¿Qué día y a qué hora?". Es D17 y la línea 184 (no inventar título ni duración), como la
-    diferencia del caso B con la línea 319 (F4); el test fija el texto real.
+    diferencia del caso B con la línea 319 (F4); el test fija el texto real. [la parte de la 17,
+    resuelta en D93]
   - *`caso_c.txt` con el modelo real (tareas 17 y 20):* con `gemini-3.5-flash-lite`, `C1` cae en
     R2 (D52), así que "Solo avísale" llega con la notificación ya pendiente y el archivo no
-    reproduce lo que fija el test (líneas 353-355).
+    reproduce lo que fija el test (líneas 353-355). [la parte de la 17, resuelta en D93]
   - *Reloj real en la CLI (tarea 17):* los tests fijan `NOW` (martes 2026-11-17 09:00); por la CLI,
     `caso_d.txt` y los relativos ("mañana") se leen contra la fecha local del día en que se corre.
+    [resuelto en D93]
   - *Estado incierto (tarea 19):* ningún archivo de entrada muestra el timeout ni el estado
     incierto (línea 451); la 19 cita los tests (c)–(e) del caso H al explicarlo.
   - *Sesiones del autor (tarea 20):* la limpieza de `tests/test_cli.py` también borra una sesión
     `assistant`/`cli` que el autor cree en el mismo Redis mientras corre ese test; el README lo
     dice, o los tests usan otra base de Redis.
+
+**D93 · Tarea 17: las conversaciones de `examples/inputs/` grabadas con el modelo real**
+(2026-11-17) · la corrida, aprobada por el autor; las decisiones A–D, autodecididas por el
+orquestador; revisables
+
+- **Decisión:** el autor aprobó una corrida de 23 llamadas reales a `gemini-3.5-flash-lite`, una
+  por línea de `examples/inputs/` (A 1, B 4, C 4, D 2, E 3, F 2, G 2, H 5), con techo duro de 30;
+  se usaron 23. Cada archivo pasó por la CLI en una sesión nueva (D24), en orden A → H, sobre
+  `f6afe1d`, sin `MOCK_FAIL` y con Redis local, el 2026-11-17 de 18:25 a 18:31 (CST). Su stdout,
+  sin editar, está en `examples/transcripts/caso_a.txt` … `caso_h.txt`, y la nota
+  `examples/transcripts/README.md` da la cuenta de llamadas y, turno por turno, si la respuesta
+  coincide con el test del caso o en qué difiere y por qué. Sin cambios en `assistant/`, `core/`
+  ni `examples/inputs/`. Nada de esto cambia lo que ve el usuario, cuándo se ejecuta una tool ni
+  qué se guarda, así que va en una línea cada uno (regla del autor desde la tarea 07):
+  - *Cómo se mandan las líneas (decisión A, opción (b)):* un guion de bash fuera del repo manda
+    una línea por turno, espera su respuesta y 13 s más (el ritmo de la 06, D28) y deja de mandar
+    tras un turno `model_unavailable` o `not_understood`; no paró. La CLI no cambia y el stdout es
+    el mismo que con `uv run python -m assistant.cli < examples/inputs/caso_x.txt`.
+  - *Sin repreguntas (decisión B, opción (a)):* solo las 23 líneas fijas; cada transcripción queda
+    como sale y la nota dice dónde difiere.
+  - *stderr (decisión C, opción (a)):* solo stdout se versiona, como dice D22; el stderr quedó
+    fuera del repo y la nota lleva por turno un extracto del log (`act`, `ops`, `route` y, si
+    están, `depends`, `results`, `invalid` y si hubo `rejected` o `ambiguity`), sin valores del
+    usuario ni ids de sesión u operación.
+  - *Atadura (decisión D, opción (a)):* `test_transcripts_echo_their_inputs`
+    (`tests/test_cases.py`) exige los ocho archivos y `README.md`, que los ecos `> ` de cada uno
+    sean las líneas de su entrada en orden, que cada eco tenga después una respuesta y el archivo
+    termine en salto de línea, y que ninguna línea lleve `"act"`, una plantilla de fallo del modelo
+    (D23), `AIza` ni una ruta local. Una entrada cambiada sin volver a grabar lo hace fallar.
+  - *Cita:* el comentario del caso C en `tests/test_cases.py` pasa a la línea 353 (antes, 352).
+- **Lo que mostró la corrida:** 23 de 30 llamadas y ≤ 46 peticiones HTTP (un 503 reintentado
+  que termina bien no deja rastro, D1.2 y D36); ningún turno "modelo no disponible" ni "no te
+  entendí". A, B, D, E, G y H dan la misma respuesta que su test, salvo los IDs. C difiere en los
+  turnos 1–3: `C1` cae en R2 y pide el canal (D52); "Solo avísale" llega como `channel`, el
+  validador lo rechaza (`not_allowed`, D44) y "Por correo" lo reemplaza (D4). F difiere en el
+  turno 2: el modelo puso "revisar el servidor" en `title` y dio `act=reject`, que con otra tool es
+  cambio de intención (D3.1, D3.3; ruta `other_tool:R2`). En E el modelo dio
+  `depends=send_notification<create_ticket` sin inferir nada, y `history` guarda el `message`
+  "ya se registró la falla (ticket TCK-…)" con el ID de la transcripción (D90). En H el quinto
+  turno es `reused` (D62, D88). La corrida fue el mismo día que `NOW`, así que D lee el 2026-11-20
+  como el test. Cada "Listo: …" y "Ya creé …" viene tras una confirmación y un "sí" (D7.1).
+- **Motivo:** el entregable 12 de §7 (TASK.md línea 526, la parte de las transcripciones), que
+  otra persona pueda repetirlas con el comando de la nota (línea 528) y sin credenciales en lo
+  versionado (línea 530); muestra el agente con un modelo compatible con ADK (línea 462) y da
+  material para las preguntas 1 y 8 de §9 (líneas 552 y 560). Las cuatro opciones son las más
+  chicas: ninguna toca la CLI.
+- **Descartadas:** (A)(a) `< archivo` tal cual (las líneas salen seguidas y, ante un 429, la CLI
+  sigue mandando y deja una transcripción rota) y (A)(c) una opción `--delay` en la CLI (cambia
+  `assistant/cli.py` y D24 por una sola corrida); (B)(b) añadir respuestas hasta el estado del
+  test (separa las transcripciones de `examples/inputs/` y sale de lo aprobado); (C)(b) versionar
+  el stderr (ids de sesión, `changes=` con valores, el texto de `ambiguity=` de D21 y, ante un
+  error, rutas locales) y (C)(c) no dar ni el extracto; (D)(b) ningún test.
+- **Resuelve:** el *Pendiente* de D22; los de D52 (la transcripción de C y la aprobación nueva),
+  D91 (*Tarea 17*) y D92 (*Reloj real en la CLI* y la parte de la 17 de *Caso F* y de
+  *`caso_c.txt`*).
+- **Lo prueban:** `test_transcripts_echo_their_inputs` y, sin cambios,
+  `test_example_inputs_are_the_case_messages` y `test_example_inputs_run_through_the_cli_loop`.
+  711 tests.
+- **Pendiente:**
+  - *README (tarea 20):* enlazar las transcripciones; decir que por tubería las líneas salen
+    seguidas y la capa gratuita puede responder un 429 a mitad de un archivo (D28); que
+    `caso_c.txt` no pide la aclaración de la línea 355 y remite a `test_case_c_through_the_node`
+    (D52); la diferencia de F con la línea 403 (D92); y que `MOCK_FAIL` no se grabó con el modelo
+    real (D91).
+  - *Documentación técnica (tarea 19):* F grabado sirve a la pregunta 1 (línea 552): qué campo
+    recibe un texto lo decide el modelo, y D17 solo garantiza que el código no deriva el título.
+    Ningún archivo muestra el timeout ni el estado incierto (línea 451); la 19 cita los tests del
+    caso H.
+  - *Tests sin tarea:* `test_case_f_through_the_node` no parametriza `reject`, el `act` que dio el
+    modelo real; y `test_transcripts_echo_their_inputs` no comprueba que cada respuesta esté entera
+    ni que cada "Listo: …" siga a un "sí" (lo revisó a mano la evaluación).
+  - *No verificable desde fuera:* que cada archivo se grabó una sola vez y sin editar; lo sostiene
+    la coherencia entre las horas de los archivos, el log y la sesión de E en Redis.
