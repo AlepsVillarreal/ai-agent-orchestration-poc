@@ -2108,7 +2108,7 @@ orquestador; revisable
     tickets never become one" sin esa salvedad.
   - *Tres operaciones:* ningún test trae tres operaciones de la misma tool; una regresión que
     uniera solo el subgrupo disjunto no la vería nadie (nota 1). La operación vacía de *Lo que ve
-    el usuario* tampoco tiene test (nota 3).
+    el usuario* tampoco tiene test (nota 3). [resuelto en D92]
   - *Tamaño:* `core/turn.py` tiene 471 líneas (D50, *Pendiente*).
 
 **D55 · Hash distinto con el registro todavía válido: una línea fija lo dice** (2026-11-17) ·
@@ -2313,7 +2313,7 @@ autodecidida por el orquestador; revisable
     La cerraría un test que parchee `datetime` en `assistant.agent` y pase "mañana" por el
     `Runner`. [resuelto en D63]
   - *Tamaño:* `core/turn.py` tiene 510 líneas (tarea 15) y `core/validation.py`, 263 (ronda 3,
-    nota 7).
+    nota 7). [resuelto en D92]
 
 **D59 · Cada paso de `history` dice qué pasó: `outcome`, `result` y `error`** (2026-11-17) ·
 autodecidida por el orquestador; revisable
@@ -2395,7 +2395,7 @@ autodecidida por el orquestador; revisable
     (revisión de la tarea 11, ronda 1, nota 9). [resuelto en D90: sigue inalcanzable con el
     número; límite para la 19]
   - *Un `done` ilegible:* la rama de `from_stored` que lo da por `uncertain` no tiene test (ronda
-    2, nota 2).
+    2, nota 2). [resuelto en D92]
   - *Resto en Redis:* un resultado JSON que Redis no puede codificar en UTF-8 (un sustituto
     suelto, `"\ud800"`) lanza en `complete`, después de que la tool corrió: el turno revienta sin
     escribir `pending` ni `history`, la clave queda `started` y el "sí" siguiente da `uncertain`
@@ -2573,7 +2573,7 @@ el orquestador; revisable
     paso (D59). [resuelto en D88–D91; la clave, después de añadirlo (D88, del autor)]
   - *`MOCK_FAIL` con el modelo real:* solo se probó por `_run` con el modelo falso; `adk web` con
     el registro en memoria no se lanzó.
-  - *Tamaño:* `core/turn.py` tiene 532 líneas (tarea 15).
+  - *Tamaño:* `core/turn.py` tiene 532 líneas (tarea 15). [resuelto en D92]
 
 **D64 · Cambio de intención: una línea fija dice que se descartó lo pendiente** (2026-11-17) ·
 decidida por el autor
@@ -2810,6 +2810,7 @@ autodecidida por el orquestador; revisable
     nota 4). [resuelto en D87]
   - *Sin test:* AW 2 solo se vio en sondas de la revisión.
   - *Tamaño:* `core/turn.py` tiene 599 líneas, a una del límite de la brief (tarea 15).
+    [resuelto en D92]
 
 **D72 · Numeración de `TASK.md`: una línea en blanco en lugar de la línea 4** (2026-11-17) ·
 autodecidida por el orquestador; revisable
@@ -3099,7 +3100,7 @@ revisable
 - **Pendiente:**
   - *Cuatro candidatas (nota 3):* `test_four_candidates_answer_the_capabilities` solo comprueba que
     `new_record` devuelve `None`; ningún test ejecuta la rama de `_rules_table` que responde las
-    capacidades. Es inalcanzable con tres tools.
+    capacidades. Es inalcanzable con tres tools. [resuelto en D92]
   - *`changes=` en R4 y R5 (nota 4):* dos tools con un campo del mismo nombre no se distinguirían
     en el log; con el catálogo actual no hay colisión. Las tareas 19 y 20 lo dicen junto al
     *Pendiente* de D21, y la 14a lo tiene en cuenta si suma la tool al log (D44, *Log*).
@@ -3107,6 +3108,7 @@ revisable
   - *Legibilidad (nota 6):* el nombre de `test_r3_r4_r5_do_not_start_anything_yet` ya no dice lo
     que afirma, y la variable local `chosen` de `answer_rule` comparte nombre con la función
     `chosen` del módulo (sin efecto). [el nombre del test, resuelto en D87; `chosen`, tarea 15]
+    [`chosen`: resuelto en D92]
   - *AW 1 en R3 (D71):* un cambio de intención, o una regla 4, que cae en R3 sigue vaciando
     `pending` (14a; 19 y 20 mientras tanto). [resuelto en D87]
   - *Tamaño:* `core/turn.py` tiene 600 líneas, justo en el límite de la brief; la 14a no cabe sin
@@ -3386,7 +3388,7 @@ autodecidida por el orquestador; revisable
     idempotencia de cada paso, el reporte de fallo parcial (D8.3), el fijo `E3` y quitar el freno
     de D86. [resuelto en D88–D91]
   - *Tarea 15:* (A19), la rama de cuatro candidatas sin test, y la variable local `chosen` de
-    `answer_rule` (D81, *Legibilidad*).
+    `answer_rule` (D81, *Legibilidad*). [resuelto en D92]
 
 **D88 · Precisa D9.1 y D62: la clave del paso que recibe el número cubre los valores que recibe la
 tool** (2026-11-17) · decidida por el autor
@@ -3563,3 +3565,73 @@ hash** (2026-11-17) · autodecidida por el orquestador; revisable
     (decisión F).
   - *`MOCK_FAIL` con el modelo real:* el fallo parcial solo se probó con el modelo falso y la
     variante `simulated` que usa `MOCK_FAIL` (D63, *Pendiente*).
+
+**D92 · Tarea 15: los casos A–H como tests y sus entradas en `examples/inputs/`** (2026-11-17) ·
+autodecidida por el orquestador; revisable
+
+- **Decisión:** la 15 no cambia comportamiento: prueba por el nodo de ADK real, con el modelo
+  falso, lo que ya hacen D1–D91 y D3.3 en cada caso de TASK.md §4 (líneas 288-451). Nada de esto
+  cambia lo que ve el usuario, cuándo se ejecuta una tool ni qué se guarda, así que va en una línea
+  cada uno (regla del autor desde la tarea 07):
+  - *Formato de `examples/inputs/` (decisión A, opción (a)):* un archivo por caso, `caso_a.txt` …
+    `caso_h.txt`, UTF-8, un mensaje por línea, sin líneas en blanco ni comentarios y con salto de
+    línea final; 23 líneas, cada una el `message` de un fijo. La CLI no cambia: manda como mensaje
+    toda línea no vacía (D24), así que un comentario llegaría al modelo como un turno.
+  - *Dónde viven los casos:* `tests/test_cases.py`, un grupo `test_case_<x>_…` por caso, en orden
+    A–H, cada test con las líneas de TASK.md que comprueba. Los once tests de casos de
+    `tests/test_agent.py` se mueven sin perder aserciones; dos cambian de nombre:
+    `test_clarification_cancel_through_the_node` pasa a `test_case_c_no_through_the_node` y
+    `test_partial_failure_through_the_node`, a `test_case_e_second_step_fails_through_the_node`.
+  - *Ayudantes del nodo:* `tests/node_helpers.py` (`make_runner`, `record_tools`,
+    `record_results`, `fail_every_tool`, `call_counts`, `freeze_clock`, `h1_values` y los que ya
+    compartían los tests del nodo); el reloj del nodo queda fijo en `NOW`, así ningún caso depende
+    del día en que corre la suite. Los ayudantes de `tests/test_turn.py` no se tocan.
+  - *Fijos nuevos:* `C2` (el canal del caso C, "Por correo"), `K4` ("Solo la reunión") y `D2` (la
+    corrección del caso D, "El 20 de noviembre a las 10:30"), con redacción propia;
+    `tests/interpretations.py` solo suma líneas y la fase 0 sigue listando 23.
+  - *Atadura:* `test_example_inputs_are_the_case_messages` exige que cada línea sea el `message`
+    de su fijo, en orden, y `test_example_inputs_run_through_the_cli_loop` pasa cada archivo por
+    `chat()` (`assistant/cli.py`), así los archivos no pueden separarse de los tests.
+  - *Legibilidad (D81):* la variable local `chosen` de `answer_rule` (`core/clarification.py`)
+    pasa a `explicit_tools`; es el único cambio en `core/`, sin cambio de lógica.
+  - *Tamaño:* `core/turn.py` (550 líneas) y `core/validation.py` (263) quedan ≤ 600 sin partir.
+  - *Limpieza de Redis:* los dos tests de `_run` en `tests/test_cli.py` borran al terminar toda
+    sesión `assistant`/`cli` que no existía antes del test, leída con `list_sessions`.
+  - *D22:* la 15 no captura stderr (`chat()` escribe en el `out` que recibe y el log va a
+    `logging`), así que su *Pendiente* sigue solo para la 17.
+- **Lo que comprueban (casos A–H):** cada viñeta de "Comportamiento esperado" contra la respuesta
+  literal, el estado de la sesión y las llamadas a cada mock, incluidas las variantes que antes
+  solo probaba el núcleo: la reunión y el "Sí" suelto en C (línea 134), la corrección en D (línea
+  369), el fallo del paso 1 en E (línea 270), el "sí" que nombra otra tool y el "sí" sin nada
+  pendiente en G (línea 284), y en H el timeout del modelo, el "sí" reenviado tras un turno no
+  guardado y el estado incierto (líneas 443 y 451).
+- **Motivo:** los entregables 7, 8 y 12 de §7 (TASK.md líneas 521, 522 y 526, la parte de las
+  entradas): los casos implementados, los tests automatizados y los mensajes que la tarea 17 manda
+  al modelo real por la CLI. La opción (a) es la más chica y no toca la CLI.
+- **Descartada:** (b) que la CLI salte las líneas que empiezan con `#`: cambia lo que la CLI envía
+  (un mensaje que empiece con "#" dejaría de llegar), toca `assistant/cli.py` y D24, y TASK.md no
+  lo pide.
+- **Resuelve:** el *Pendiente* de D54 (*Tres operaciones*), los de D81 (*Cuatro candidatas* y la
+  parte `chosen` de *Legibilidad*), el de D87 (*Tarea 15*), el de D60 (*Un `done` ilegible*) y los
+  *Tamaño* de D58, D63 y D71.
+- **Lo prueban:** los 24 tests de `tests/test_cases.py` (`test_case_a_…` a `test_case_h_…`, más
+  los dos de `examples/inputs/`), `test_three_split_ops_join_all_or_nothing`,
+  `test_empty_split_ops_repeat_the_question` y `test_unreadable_done_is_uncertain`
+  (`tests/test_turn.py`), `test_four_plausible_tools_answer_the_capabilities` y
+  `test_new_record_is_none_with_four_candidates` (antes `test_four_candidates_answer_the_capabilities`,
+  `tests/test_clarification.py`). 710 tests.
+- **Pendiente:**
+  - *Caso F frente a la línea 403 (tareas 17 y 20):* tras "Agenda una reunión con Juan" la pregunta
+    nombra los cuatro faltantes ("el título, la fecha, la hora y la duración en minutos"), no solo
+    "¿Qué día y a qué hora?". Es D17 y la línea 184 (no inventar título ni duración), como la
+    diferencia del caso B con la línea 319 (F4); el test fija el texto real.
+  - *`caso_c.txt` con el modelo real (tareas 17 y 20):* con `gemini-3.5-flash-lite`, `C1` cae en
+    R2 (D52), así que "Solo avísale" llega con la notificación ya pendiente y el archivo no
+    reproduce lo que fija el test (líneas 353-355).
+  - *Reloj real en la CLI (tarea 17):* los tests fijan `NOW` (martes 2026-11-17 09:00); por la CLI,
+    `caso_d.txt` y los relativos ("mañana") se leen contra la fecha local del día en que se corre.
+  - *Estado incierto (tarea 19):* ningún archivo de entrada muestra el timeout ni el estado
+    incierto (línea 451); la 19 cita los tests (c)–(e) del caso H al explicarlo.
+  - *Sesiones del autor (tarea 20):* la limpieza de `tests/test_cli.py` también borra una sesión
+    `assistant`/`cli` que el autor cree en el mismo Redis mientras corre ese test; el README lo
+    dice, o los tests usan otra base de Redis.
