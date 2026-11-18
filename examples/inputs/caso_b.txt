@@ -1,0 +1,4 @@
+Crea un ticket para revisar el problema de autenticación
+Alta, asígnalo a Carlos
+El título es Falla de autenticación
+Sí, créalo

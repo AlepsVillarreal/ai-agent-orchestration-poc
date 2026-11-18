@@ -54,8 +54,12 @@ uv run python -m assistant.cli --session <ID>
 
 # Mensajes por tubería: cada línea es un mensaje y la salida se lee como transcripción
 printf 'Necesito crear un ticket\n' | uv run python -m assistant.cli
+
+# Los mensajes de un caso de prueba (examples/inputs/caso_a.txt … caso_h.txt)
+uv run python -m assistant.cli < examples/inputs/caso_b.txt
 ```
 
+- `examples/inputs/` tiene un archivo por caso de TASK.md §4, con un mensaje por línea (sin comentarios ni líneas en blanco: la CLI manda toda línea no vacía). Son los mismos mensajes que `tests/test_cases.py` pasa con el modelo falso; con el modelo real y la fecha del día, las respuestas pueden diferir de las de los tests.
 - Sin `--session`, cada ejecución abre una sesión nueva; su id y el comando para continuarla se imprimen en stderr.
 - stdout lleva solo la conversación. Con stdin por tubería, cada línea del usuario se repite como `> …` antes de la respuesta.
 - stderr lleva el aviso de sesión, el aviso de `MOCK_FAIL` si está activo, una línea de log por turno (`assistant.turn`, en formato `clave=valor`) y las trazas de ADK cuando falla el modelo. Un turno que ejecuta una herramienta suma `results=herramienta:ID:resultado` (`ran`, `reused`, `failed` o `uncertain`; en un plan, uno por paso intentado, en orden), `idem=` con la clave de idempotencia de cada paso y, si la herramienta lanzó una excepción, `tool_error=` con su tipo. Un turno que arma un plan de varias herramientas suma, tras `route=`, `depends=` con sus dependencias (`send_notification<create_ticket`, con `:inferred` si la dedujo el registro y `:ignored` si se descartó), vacío si no tiene ninguna.
@@ -116,4 +120,4 @@ docker compose up -d redis   # algunos tests usan Redis
 uv run pytest
 ```
 
-Los tests no llaman al modelo real: usan un modelo falso con respuestas fijas. Si Redis no responde, los tests que lo necesitan fallan con un mensaje que indica cómo levantarlo.
+Los tests no llaman al modelo real: usan un modelo falso con respuestas fijas. `tests/test_cases.py` tiene un grupo de tests por caso de TASK.md §4 (`test_case_a_…` a `test_case_h_…`), que pasan por el agente de ADK con ese modelo falso. Si Redis no responde, los tests que lo necesitan fallan con un mensaje que indica cómo levantarlo.

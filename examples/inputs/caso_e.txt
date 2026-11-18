@@ -1,0 +1,3 @@
+Crea un ticket de prioridad alta para Carlos y mándale una notificación por email cuando esté creado
+El título es Servidor caído, la descripción es que el servidor de producción no responde, y el mensaje: ya se registró la falla
+Sí, adelante

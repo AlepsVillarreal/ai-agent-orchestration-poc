@@ -82,23 +82,23 @@ def answer_rule(
     does not resolve it. The rules are tried in order.
     """
     candidate_set = set(candidates)
-    chosen = {op["tool"] for op in operations if op["certainty"] == Certainty.EXPLICIT}
+    explicit_tools = {op["tool"] for op in operations if op["certainty"] == Certainty.EXPLICIT}
     plausible = {op["tool"] for op in operations if op["certainty"] == Certainty.PLAUSIBLE}
-    inside = chosen <= candidate_set
+    inside = explicit_tools <= candidate_set
 
     if act in (Act.CANCEL, Act.REJECT) and inside:
         return DISCARD  # a "no" never selects: "No, la reunión no" names what is not wanted
     if (
-        chosen
+        explicit_tools
         and inside
         and act in (Act.REQUEST_ACTION, Act.PROVIDE_INFO, Act.CONFIRM)
-        and not ((candidate_set - chosen) & plausible)
-        and (act != Act.CONFIRM or len(chosen) == 1)
+        and not ((candidate_set - explicit_tools) & plausible)
+        and (act != Act.CONFIRM or len(explicit_tools) == 1)
     ):
         return RESOLVE
     if (
         act == Act.CONFIRM
-        and not chosen
+        and not explicit_tools
         and len(candidate_set) == 1
         and confirms_tool in (None, *candidate_set)
     ):

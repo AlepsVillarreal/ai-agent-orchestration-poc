@@ -90,6 +90,12 @@ FIXED: dict[str, FixedTurn] = {
             "ambiguity_reason": "It may also mean a meeting with Carlos tomorrow.",
         },
     ),
+    # Case C, third message after "Solo avísale" (`K2`; own wording, task 15): the channel the
+    # notice still needs. TASK.md lines 338-355 do not show it.
+    "C2": FixedTurn(
+        "Por correo",
+        {"act": "provide_info", "operations": [_op("send_notification", channel="correo")]},
+    ),
     # Case D, TASK.md line 361: the values arrive uncorrected.
     "D1": FixedTurn(
         "Agenda una reunión el 40 de noviembre a las 25:90",
@@ -100,6 +106,20 @@ FIXED: dict[str, FixedTurn] = {
                     "schedule_meeting",
                     date={"day": 40, "month": 11},
                     time={"hour": 25, "minute": 90},
+                )
+            ],
+        },
+    ),
+    # Case D, second message (own wording, task 15): the correction TASK.md line 369 asks for.
+    "D2": FixedTurn(
+        "El 20 de noviembre a las 10:30",
+        {
+            "act": "provide_info",
+            "operations": [
+                _op(
+                    "schedule_meeting",
+                    date={"day": 20, "month": 11},
+                    time={"hour": 10, "minute": 30},
                 )
             ],
         },
@@ -288,6 +308,11 @@ FIXED: dict[str, FixedTurn] = {
         {"act": "provide_info", "operations": [_op("send_notification")]},
     ),
     "K3": FixedTurn("No sé, lo que sea", {"act": "other", "operations": []}),
+    # Case C (own wording, task 15): the answer that picks only the meeting (TASK.md line 348).
+    "K4": FixedTurn(
+        "Solo la reunión",
+        {"act": "provide_info", "operations": [_op("schedule_meeting")]},
+    ),
     "S1": FixedTurn("Sí", {"act": "confirm", "operations": []}),
     "S2": FixedTurn("No, la reunión no", {"act": "reject", "operations": []}),
 }

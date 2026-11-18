@@ -1,0 +1,2 @@
+Envía un correo a Carlos para informarle que el ticket quedó resuelto
+Sí, hazlo

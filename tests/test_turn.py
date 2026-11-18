@@ -1425,6 +1425,55 @@ def test_split_ops_outside_same_tool_follow_d11(monkeypatch, pending_key, turn, 
     assert nothing_ran(calls)
 
 
+# Note (ttt) (D54 *Pendiente*, *Tres o más operaciones*): three operations of the pending tool
+# with disjoint keys are joined all together; when two of them repeat a key, none is joined
+# ("nunca se une una parte") and D11 asks which one first.
+def test_three_split_ops_join_all_or_nothing():
+    pending = f1_pending()
+    message = "Ponle de título Revisión, 30 minutos y agrega a Ana"
+    three = interpretation(
+        "provide_info",
+        op("schedule_meeting", title="Revisión"),
+        op("schedule_meeting", duration_minutes=30),
+        op("schedule_meeting", attendees_add=["Ana"]),
+    )
+    joined = interpretation(
+        "provide_info",
+        op("schedule_meeting", title="Revisión", duration_minutes=30, attendees_add=["Ana"]),
+    )
+
+    outcome = handle_turn(pending, three, TurnInput(message, NOW, SESSION))
+    single = handle_turn(pending, joined, TurnInput(message, NOW, SESSION))
+
+    assert outcome.route == single.route == "same_tool"
+    assert outcome.reply == single.reply
+    assert outcome.state_delta["pending"]["steps"] == single.state_delta["pending"]["steps"]
+
+    overlapping = interpretation(
+        "provide_info",
+        op("schedule_meeting", title="Revisión"),
+        op("schedule_meeting", duration_minutes=30),
+        op("schedule_meeting", title="Otra"),
+    )
+    message = "Ponle de título Revisión, 30 minutos, o mejor Otra"
+    outcome = handle_turn(pending, overlapping, TurnInput(message, NOW, SESSION))
+
+    assert outcome.reply == "Puedo hacer una operación de cada tipo por mensaje; ¿por cuál empiezo?"
+    assert outcome.state_delta == {}
+
+
+# Note (ttt) (D54 *Pendiente*; D40): operations of the pending tool with no key present (a "" is
+# absent) repeat the question and change nothing.
+def test_empty_split_ops_repeat_the_question():
+    pending = f1_pending()
+    empty = interpretation("provide_info", op("schedule_meeting", title=""), op("schedule_meeting"))
+
+    outcome = handle_turn(pending, empty, TurnInput("Vale", NOW, SESSION))
+
+    assert outcome.reply == pending["last_question"]
+    assert outcome.state_delta == {}
+
+
 # Brief 09b ------------------------------------------------------------------------------------
 
 
@@ -1771,6 +1820,33 @@ def test_started_without_done_is_uncertain(monkeypatch):
     assert entry["steps"][0]["outcome"] == "uncertain"
     assert entry["steps"][0]["result"] is None and "error" not in entry["steps"][0]
     assert executions.snapshot() == {h1_key(): {"status": "started"}}
+
+
+# Note (A6) (D60, D9.2): a key stored as `done` whose result cannot be read as a success is
+# uncertain: the stored answer is never taken as a ticket, and the tool never runs again.
+@pytest.mark.parametrize(
+    "stored",
+    [
+        {"success": True, "message": "sin número"},
+        {"success": False, "ticket_id": None, "message": "falló"},
+        ["no", "es", "un", "dict"],
+    ],
+    ids=["without_ticket_id", "success_false", "not_a_dict"],
+)
+def test_unreadable_done_is_uncertain(monkeypatch, stored):
+    calls = counting(monkeypatch, "create_ticket")
+    executions = InMemoryExecutions()
+    assert executions.reserve(h1_key()) is None
+    executions.complete(h1_key(), stored)
+
+    record = turn_in(None, "H1", executions).state_delta["pending"]
+    outcome = turn_in(record, "B4", executions)
+
+    assert calls == []
+    assert outcome.reply == UNCERTAIN_H1
+    [entry] = outcome.state_delta["history"]
+    assert entry["status"] == "uncertain"
+    assert entry["steps"][0]["outcome"] == "uncertain"
 
 
 def raise_runtime_error(args):

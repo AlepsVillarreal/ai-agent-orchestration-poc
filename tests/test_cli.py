@@ -25,7 +25,6 @@ import assistant.cli
 from assistant.agent import build_root_agent
 from assistant.cli import _without_password, chat
 from assistant.interpreter import build_interpreter
-from core.confirmation import shown_values
 from core.executions import execution_key
 from core.instruction import pending_summary
 from core.interpretation import TurnInterpretation
@@ -33,6 +32,7 @@ from core.registry import TOOLS
 from core.turn import TurnInput, handle_turn
 from tests.fake_llm import ScriptedLlm, system_text
 from tests.interpretations import FIXED, NOW, SESSION
+from tests.node_helpers import h1_values
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -95,6 +95,34 @@ def _new_session_ids(stderr: str) -> list[str]:
     return re.findall(r"Sesión nueva: (\w+)\.", stderr)
 
 
+async def _cli_sessions(redis_url: str) -> set[str]:
+    """The ids of every session of the CLI's app and user stored in Redis."""
+    client = redis_asyncio.from_url(redis_url, decode_responses=True)
+    try:
+        listed = await RedisSessionService(redis_client=client).list_sessions(
+            app_name="assistant", user_id=assistant.cli.USER_ID
+        )
+        return {session.id for session in listed.sessions}
+    finally:
+        await client.aclose()
+
+
+async def _delete_sessions_not_in(redis_url: str, before: set[str]) -> None:
+    """Note (k): delete every CLI session the test created, found by listing them (not by
+    reading stderr, so a run that failed before printing its id leaves nothing behind)."""
+    client = redis_asyncio.from_url(redis_url, decode_responses=True)
+    try:
+        service = RedisSessionService(redis_client=client)
+        listed = await service.list_sessions(app_name="assistant", user_id=assistant.cli.USER_ID)
+        for session in listed.sessions:
+            if session.id not in before:
+                await service.delete_session(
+                    app_name="assistant", user_id=assistant.cli.USER_ID, session_id=session.id
+                )
+    finally:
+        await client.aclose()
+
+
 # Review 04-1, note 2: the wiring of `_run` (Redis service, `auto_create_session`, a new
 # session per run, `--session` continues it). In process, with the app's model replaced by the
 # scripted fake, so no turn reaches the real model.
@@ -108,7 +136,7 @@ async def test_run_creates_a_session_per_run_and_continues_it(redis_url, monkeyp
     monkeypatch.setenv("REDIS_URL", redis_url)
     monkeypatch.setenv("GOOGLE_API_KEY", "fake-key-never-sent")  # only passes the startup check
 
-    session_id = None
+    before = await _cli_sessions(redis_url)
     try:
         monkeypatch.setattr(sys, "stdin", io.StringIO(FIXED["A1"].message + "\n"))
         assert await assistant.cli._run(None) == 0
@@ -145,12 +173,7 @@ async def test_run_creates_a_session_per_run_and_continues_it(redis_url, monkeyp
         assert len(ids) == 2 and len({session_id, *ids}) == 3
         assert fake.calls == 2
     finally:
-        if session_id:
-            client = redis_asyncio.from_url(redis_url, decode_responses=True)
-            await RedisSessionService(redis_client=client).delete_session(
-                app_name="assistant", user_id=assistant.cli.USER_ID, session_id=session_id
-            )
-            await client.aclose()
+        await _delete_sessions_not_in(redis_url, before)
 
 
 @pytest.mark.parametrize(
@@ -170,17 +193,6 @@ def test_redis_url_in_messages_never_shows_a_password(url, shown):
 # Brief 11 -------------------------------------------------------------------------------------
 
 
-def h1_values() -> dict:
-    """The normalized values `create_ticket` receives for `H1` (no date: independent of now)."""
-    pending = handle_turn(
-        None,
-        TurnInterpretation.model_validate(FIXED["H1"].interpretation),
-        TurnInput(FIXED["H1"].message, NOW, SESSION),
-    ).state_delta["pending"]
-    [step] = shown_values(pending["steps"], NOW)
-    return step["normalized"]
-
-
 # 19: the CLI keeps its executions in Redis, and `MOCK_FAIL` makes a tool answer a failure.
 async def test_cli_uses_the_redis_registry_and_mock_fail(redis_url, monkeypatch, capsys):
     for name in list(TOOLS):  # the CLI replaces tools in TOOLS; monkeypatch restores them
@@ -194,13 +206,13 @@ async def test_cli_uses_the_redis_registry_and_mock_fail(redis_url, monkeypatch,
     conversation = f"{FIXED['H1'].message}\n{FIXED['B4'].message}\n"
     values = h1_values()
     check = redis.Redis.from_url(redis_url, decode_responses=True)
-    session_ids, keys = [], []
+    before = await _cli_sessions(redis_url)
+    keys = []
     try:
         monkeypatch.setattr(sys, "stdin", io.StringIO(conversation))
         assert await assistant.cli._run(None) == 0
         captured = capsys.readouterr()
         [session_id] = _new_session_ids(captured.err)
-        session_ids.append(session_id)
         keys.append(f"idem:{execution_key(session_id, 'create_ticket', values)}")
         assert "Listo: creé el ticket " in captured.out
         assert json.loads(check.get(keys[0]))["status"] == "done"
@@ -211,7 +223,6 @@ async def test_cli_uses_the_redis_registry_and_mock_fail(redis_url, monkeypatch,
         assert await assistant.cli._run(None) == 0
         captured = capsys.readouterr()
         [session_id] = _new_session_ids(captured.err)
-        session_ids.append(session_id)
         keys.append(f"idem:{execution_key(session_id, 'create_ticket', values)}")
         assert "MOCK_FAIL: create_ticket" in captured.err
         assert captured.out.endswith(
@@ -225,13 +236,7 @@ async def test_cli_uses_the_redis_registry_and_mock_fail(redis_url, monkeypatch,
         if keys:
             check.delete(*keys)
         check.close()
-        client = redis_asyncio.from_url(redis_url, decode_responses=True)
-        service = RedisSessionService(redis_client=client)
-        for session_id in session_ids:
-            await service.delete_session(
-                app_name="assistant", user_id=assistant.cli.USER_ID, session_id=session_id
-            )
-        await client.aclose()
+        await _delete_sessions_not_in(redis_url, before)
 
 
 def test_cli_exits_clearly_with_an_unknown_mock_fail(redis_url):

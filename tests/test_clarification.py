@@ -178,7 +178,8 @@ def test_clarification_question_by_count():
     assert replies.clarification_question([ticket, meeting, notice, fourth]) is None
 
 
-def test_four_candidates_answer_the_capabilities(monkeypatch):
+# Note (A19): renamed from test_four_candidates_answer_the_capabilities to what it measures.
+def test_new_record_is_none_with_four_candidates(monkeypatch):
     # Unreachable with three tools (D11 leaves one operation per tool); a fourth tool shows it.
     fourth = dataclasses.replace(TOOLS["create_ticket"], name="book_room")
     monkeypatch.setitem(TOOLS, "book_room", fourth)
@@ -187,6 +188,21 @@ def test_four_candidates_answer_the_capabilities(monkeypatch):
     ]
     record, changes, rejected = new_record(operations, "Algo")
     assert (record, changes, rejected) == (None, [], [])
+
+
+# Note (A19) (D3: four or more candidates answer the capabilities): the branch of the rules
+# table, through `handle_turn`, with a fourth tool registered.
+def test_four_plausible_tools_answer_the_capabilities(monkeypatch):
+    fourth = dataclasses.replace(TOOLS["create_ticket"], name="book_room")
+    monkeypatch.setitem(TOOLS, "book_room", fourth)
+    turn = interpretation("request_action", *(op(name, "plausible") for name in TOOLS))
+    assert len(turn.operations) == 4
+
+    outcome = handle(None, turn, "Algo")
+
+    assert outcome.reply == replies.capabilities()
+    assert outcome.route == "R5"
+    assert outcome.state_delta == {}
 
 
 # 3 (D14; note (e)): the measured K1-S3 saw the same summary the core now produces.

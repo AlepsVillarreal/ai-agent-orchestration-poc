@@ -1,6 +1,9 @@
 """The turn node through the real ADK `Runner`, with a scripted fake model (D1.1).
 
 These tests use `InMemorySessionService`; the Redis round trip is in test_session_redis.py.
+The node's mechanics stay here (log, HTTP retries, session and clock, history, cancel); the
+cases of TASK.md §4 moved to tests/test_cases.py in task 15, and the helpers both files share
+to tests/node_helpers.py.
 """
 
 import dataclasses
@@ -10,20 +13,18 @@ from datetime import datetime
 
 import httpx
 import pytest
-from google.adk import Runner, Workflow
+from google.adk import Workflow
 from google.adk.apps import App
 from google.adk.models import Gemini
-from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 import assistant.agent
-from assistant.agent import build_root_agent, message_text
-from assistant.interpreter import INTERPRETER_RETRY_OPTIONS, MODEL, build_interpreter
+from assistant.agent import message_text
+from assistant.interpreter import INTERPRETER_RETRY_OPTIONS, MODEL
 from core import replies
 from core.confirmation import shown_values
 from core.executions import InMemoryExecutions, execution_key
 from core.instruction import NOTHING_PENDING
-from core.interpretation import TurnInterpretation
 from core.mock_tools import simulated
 from core.registry import TOOLS
 from core.turn import TurnInput, handle_turn
@@ -36,9 +37,19 @@ from tests.fake_llm import (
     run_turn,
     system_text,
 )
-from tests.interpretations import FIXED, NOW, SESSION
-
-USER = "u1"
+from tests.interpretations import FIXED, NOW
+from tests.node_helpers import (
+    USER,
+    conversation,
+    fail_every_tool,
+    freeze_clock,
+    handle_fixed,
+    make_runner,
+    record_results,
+    record_tools,
+    turn_records,
+    without_id,
+)
 
 # An unknown tool next to a known one (D10): the core drops it, the log keeps it.
 FLIGHT_AND_TICKET = (
@@ -70,28 +81,8 @@ PEDRO_FOR_CARLOS = {
 }
 
 
-def fixed(key: str) -> TurnInterpretation:
-    return TurnInterpretation.model_validate(FIXED[key].interpretation)
-
-
-def handle_fixed(pending: dict | None, key: str):
-    return handle_turn(pending, fixed(key), TurnInput(FIXED[key].message, NOW, SESSION))
-
-
 def a1_record() -> dict:
     return handle_fixed(None, "A1").state_delta["pending"]
-
-
-def without_id(record: dict) -> dict:
-    """A record without its `operation_id`, a new uuid on every `handle_turn` call (task 10a)."""
-    return {key: value for key, value in record.items() if key != "operation_id"}
-
-
-def make_runner(fake, sessions=None, executions=None) -> tuple[Runner, InMemorySessionService]:
-    sessions = sessions or InMemorySessionService()
-    root_agent = build_root_agent(build_interpreter(fake), executions=executions)
-    app = App(name="assistant", root_agent=root_agent)
-    return Runner(app=app, session_service=sessions, auto_create_session=True), sessions
 
 
 # 1
@@ -103,33 +94,6 @@ def test_app_is_where_adk_web_looks():
     assert app.root_agent is assistant.agent.root_agent
     assert isinstance(assistant.agent.root_agent, Workflow)
     assert app.resumability_config is None
-
-
-# 2
-async def test_case_a_end_to_end_through_the_node(monkeypatch):
-    expected = handle_fixed(None, "A1")
-
-    def fail(args):
-        pytest.fail(f"a tool ran with {args}")
-
-    for name, spec in list(TOOLS.items()):
-        monkeypatch.setitem(TOOLS, name, dataclasses.replace(spec, execute=fail))
-
-    fake = ScriptedLlm(script=[json.dumps(FIXED["A1"].interpretation)])
-    runner, sessions = make_runner(fake)
-
-    events = await run_turn(runner, USER, "s-a", FIXED["A1"].message)
-
-    answers = reply_events(events)
-    assert len(answers) == 1
-    assert event_text(answers[0]) == expected.reply
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-a")
-    assert without_id(session.state["pending"]) == without_id(expected.state_delta["pending"])
-
-    assert fake.calls == 1
-    request = fake.requests[0]
-    assert contents_text(request) == [FIXED["A1"].message]  # include_contents='none'
-    assert NOTHING_PENDING in system_text(request)
 
 
 # 3
@@ -160,10 +124,6 @@ async def test_failed_turn_keeps_state(item, expected):
     session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-f")
     assert session.state["pending"] == record
     assert fake.calls == 1  # the node does not retry (D1.1)
-
-
-def _turn_records(caplog) -> list[str]:
-    return [r.getMessage() for r in caplog.records if r.name == "assistant.turn"]
 
 
 # 4 and 5
@@ -197,7 +157,7 @@ async def test_one_log_line_per_turn(caplog):
         caplog.clear()
         events = await run_turn(runner, USER, session_id, text)
         answers[key] = event_text(reply_events(events)[0])
-        records = _turn_records(caplog)
+        records = turn_records(caplog)
         assert len(records) == 1, (key, records)
         lines[key] = records[0]
 
@@ -236,101 +196,6 @@ async def test_one_log_line_per_turn(caplog):
         without_values = line.split(" changes=")[0]
         for word in ("servidor", "Carlos", "Pedro", "Alta", "autenticación"):
             assert word not in without_values
-
-
-def _no_tool_runs(monkeypatch) -> None:
-    def fail(args):
-        pytest.fail(f"a tool ran with {args}")
-
-    for name, spec in list(TOOLS.items()):
-        monkeypatch.setitem(TOOLS, name, dataclasses.replace(spec, execute=fail))
-
-
-def record_tools(monkeypatch) -> dict[str, list[dict]]:
-    """Wrap every tool's `execute` to record its arguments; the real mock still runs (D12)."""
-    calls: dict[str, list[dict]] = {name: [] for name in TOOLS}
-    for name, spec in list(TOOLS.items()):
-
-        def recorder(args, name=name, real=spec.execute):
-            calls[name].append(args)
-            return real(args)
-
-        monkeypatch.setitem(TOOLS, name, dataclasses.replace(spec, execute=recorder))
-    return calls
-
-
-def record_results(monkeypatch) -> dict[str, list[dict]]:
-    """Wrap every tool's current `execute` to record what it returned (the mock's own ID)."""
-    results: dict[str, list[dict]] = {name: [] for name in TOOLS}
-    for name, spec in list(TOOLS.items()):
-
-        def recorder(args, name=name, inner=spec.execute):
-            results[name].append(inner(args))
-            return results[name][-1]
-
-        monkeypatch.setitem(TOOLS, name, dataclasses.replace(spec, execute=recorder))
-    return results
-
-
-# 13 (TASK.md lines 311-335): case B in one session, until every field is in, then a "yes".
-# Task 10a: the records are compared without `operation_id` (a new uuid on every call), the
-# complete ticket awaits confirmation, and the fourth turn runs `create_ticket` once.
-# Task 10b: the fourth turn is case B's own "yes" (`B4`, not `G2`); its reply is the result
-# line with the mock's ID, and the closed record goes to `history` (D6).
-async def test_case_b_through_the_node(monkeypatch):
-    calls = record_tools(monkeypatch)
-    results = record_results(monkeypatch)
-    keys = ("B1", "B2", "B3")
-    script = [json.dumps(FIXED[key].interpretation) for key in (*keys, "B4")]
-    fake = ScriptedLlm(script=script)
-    runner, sessions = make_runner(fake)
-
-    replies_seen, expected, pending = [], [], None
-    for key in keys:
-        replies_seen.append(
-            event_text(reply_events(await run_turn(runner, USER, "s-b", FIXED[key].message))[0])
-        )
-        outcome = handle_fixed(pending, key)
-        expected.append(outcome.reply)
-        pending = outcome.state_delta.get("pending", pending)
-
-    assert replies_seen == expected
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-b")
-    record = session.state["pending"]
-    assert without_id(record) == without_id(pending)
-    assert record["steps"][0]["args"] == {
-        "title": "Falla de autenticación",
-        "description": "revisar el problema de autenticación",
-        "priority": "Alta",
-        "assignee": "Carlos",
-    }
-    assert record["missing"] == []
-    assert record["status"] == "awaiting_confirmation"
-    assert replies_seen[-1].endswith(record["last_question"])
-    assert all(not args for args in calls.values())  # nothing runs before the "yes"
-
-    events = await run_turn(runner, USER, "s-b", FIXED["B4"].message)
-
-    assert calls["create_ticket"] == [
-        {
-            "title": "Falla de autenticación",
-            "description": "revisar el problema de autenticación",
-            "priority": "high",
-            "assignee": "Carlos",
-        }
-    ]
-    assert calls["schedule_meeting"] == [] and calls["send_notification"] == []
-    [result] = results["create_ticket"]
-    reply = event_text(reply_events(events)[0])
-    assert reply.startswith("Listo: creé el ticket ")
-    assert reply == f"Listo: creé el ticket {result['ticket_id']}."
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-b")
-    assert session.state["pending"] is None
-    [entry] = session.state["history"]
-    assert entry["operation_id"] == record["operation_id"]
-    assert entry["status"] == "completed"
-    assert entry["steps"][0]["result"] == result
-    assert fake.calls == 4
 
 
 # 14: with test 13 (Carlos gets in), this shows the core receives the real message text: the
@@ -445,7 +310,7 @@ async def test_http_retry_through_the_turn_node(script, error, caplog):
     answers = reply_events(events)
     assert len(answers) == 1
     session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-h")
-    [line] = _turn_records(caplog)  # one line per turn, retried or not
+    [line] = turn_records(caplog)  # one line per turn, retried or not
 
     if error is None:
         expected = handle_fixed(None, "A1")
@@ -498,7 +363,7 @@ def test_message_text_joins_text_parts():
 # 16 (finding 5 of backlog-04): the validator runs in the node's turn; the log names the invalid
 # field and its cause, never the value.
 async def test_invalid_word_through_the_node(monkeypatch, caplog):
-    _no_tool_runs(monkeypatch)
+    fail_every_tool(monkeypatch)
     caplog.set_level(logging.INFO, logger="assistant")
     fake = ScriptedLlm(script=[json.dumps(FIXED["X1"].interpretation)])
     runner, sessions = make_runner(fake)
@@ -516,7 +381,7 @@ async def test_invalid_word_through_the_node(monkeypatch, caplog):
     assert record["missing"] == ["title", "assignee"]
     assert fake.calls == 1
 
-    [line] = _turn_records(caplog)
+    [line] = turn_records(caplog)
     before_changes = line.split(" changes=")[0]
     assert "invalid=priority:not_allowed" in before_changes
     assert "urgente" not in before_changes
@@ -527,51 +392,6 @@ async def test_invalid_word_through_the_node(monkeypatch, caplog):
 
 
 # Brief 10a ------------------------------------------------------------------------------------
-
-
-# 14 (case G, TASK.md lines 424-438): the "yes" runs only the pending tool, once, with the
-# normalized values, and empties `pending`; the log ties both turns to the same operation.
-async def test_case_g_through_the_node(monkeypatch, caplog):
-    calls = record_tools(monkeypatch)
-    results = record_results(monkeypatch)
-    caplog.set_level(logging.INFO, logger="assistant")
-    fake = ScriptedLlm(
-        script=[json.dumps(FIXED["G1"].interpretation), json.dumps(FIXED["G2"].interpretation)]
-    )
-    runner, sessions = make_runner(fake)
-
-    first = await run_turn(runner, USER, "s-g", FIXED["G1"].message)
-    [g1_line] = _turn_records(caplog)
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-g")
-    record = session.state["pending"]
-    assert record["status"] == "awaiting_confirmation"
-    assert event_text(reply_events(first)[0]).endswith(record["last_question"])
-    assert all(not args for args in calls.values())
-    operation = record["operation_id"]
-    assert f"op={operation}" in g1_line and "route=R2" in g1_line
-
-    caplog.clear()
-    second = await run_turn(runner, USER, "s-g", FIXED["G2"].message)
-
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-g")
-    assert session.state["pending"] is None
-    assert calls["send_notification"] == [
-        {"recipient": "Carlos", "message": "el ticket quedó resuelto", "channel": "email"}
-    ]
-    assert calls["create_ticket"] == [] and calls["schedule_meeting"] == []
-    assert fake.calls == 2
-    [answer] = reply_events(second)
-    # Task 10b: the result line with the mock's ID, not the mock's `message`.
-    [result] = results["send_notification"]
-    result_id = result["notification_id"]
-    assert event_text(answer) == f"Listo: envié la notificación {result_id}."
-    [entry] = session.state["history"]
-    assert entry["operation_id"] == operation and entry["status"] == "completed"
-    [g2_line] = _turn_records(caplog)
-    # Task 11 (decision G): each step with its outcome, then its idempotency key (a hash).
-    key = execution_key("s-g", "send_notification", calls["send_notification"][0])
-    assert f"route=confirmed results=send_notification:{result_id}:ran idem={key} " in g2_line
-    assert f"op={operation}" in g2_line
 
 
 # Brief 10b ------------------------------------------------------------------------------------
@@ -613,32 +433,6 @@ async def test_history_accumulates_and_is_never_read(monkeypatch):
 
 
 # Brief 09b ------------------------------------------------------------------------------------
-
-
-# 14 (case D, TASK.md lines 361-371): through the `Runner`, with the node's own clock. Day 40 and
-# 25:90 are invalid on any day, so the reply is the core's with the fixed `NOW`.
-async def test_case_d_through_the_node(monkeypatch, caplog):
-    _no_tool_runs(monkeypatch)
-    caplog.set_level(logging.INFO, logger="assistant")
-    fake = ScriptedLlm(script=[json.dumps(FIXED["D1"].interpretation)])
-    runner, sessions = make_runner(fake)
-
-    events = await run_turn(runner, USER, "s-d", FIXED["D1"].message)
-
-    assert event_text(reply_events(events)[0]) == handle_fixed(None, "D1").reply
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-d")
-    assert session.state["pending"]["invalid"] == [
-        {"tool": "schedule_meeting", "field": "date", "cause": "nonexistent"},
-        {"tool": "schedule_meeting", "field": "time", "cause": "bad_format"},
-    ]
-
-    [line] = _turn_records(caplog)
-    before_changes = line.split(" changes=")[0]
-    assert "invalid=date:nonexistent,time:bad_format" in before_changes
-    # `op=` is a random uuid, whose hex digits may contain "40", so it is left out of the check.
-    without_op = " ".join(part for part in before_changes.split() if not part.startswith("op="))
-    for number in ("40", "25", "90"):
-        assert number not in without_op, number
 
 
 # 15 (replaces test_complete_meeting_does_not_reach_confirmation): a year far ahead, so the
@@ -696,62 +490,16 @@ async def test_meeting_through_the_node(monkeypatch):
 # Brief 11 -------------------------------------------------------------------------------------
 
 
-# 14 (case H, TASK.md lines 441-449): the node uses the registry it was built with, and the key
-# carries the session.
-async def test_case_h_through_the_node(monkeypatch, caplog):
-    calls = record_tools(monkeypatch)
-    results = record_results(monkeypatch)
-    caplog.set_level(logging.INFO, logger="assistant")
-    executions = InMemoryExecutions()
-    keys = ("H1", "B4", "H1", "B4", "H1", "B4")
-    fake = ScriptedLlm(script=[json.dumps(FIXED[key].interpretation) for key in keys])
-    runner, sessions = make_runner(fake, executions=executions)
-
-    answers, lines = [], []
-    for key in keys[:4]:
-        caplog.clear()
-        events = await run_turn(runner, USER, "s-h", FIXED[key].message)
-        answers.append(event_text(reply_events(events)[0]))
-        lines += _turn_records(caplog)
-
-    assert len(calls["create_ticket"]) == 1
-    [result] = results["create_ticket"]
-    ticket_id = result["ticket_id"]
-    assert answers[1] == f"Listo: creé el ticket {ticket_id}."
-    assert answers[3] == f"Ya creé el ticket {ticket_id} con estos mismos datos; no lo repetí."
-    key = execution_key("s-h", "create_ticket", calls["create_ticket"][0])
-    assert f"results=create_ticket:{ticket_id}:reused idem={key} " in lines[3]
-    assert executions.snapshot() == {key: {"status": "done", "result": result}}
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-h")
-    assert [entry["steps"][0]["outcome"] for entry in session.state["history"]] == [
-        "ran",
-        "reused",
-    ]
-
-    for key in keys[4:]:
-        await run_turn(runner, USER, "s-h2", FIXED[key].message)
-
-    assert len(calls["create_ticket"]) == 2  # another session: another key
-    assert len(executions.snapshot()) == 2
-    assert fake.calls == 6
-
-
 # 15 (note (A2)): the node hands the core the session id and its own clock.
 async def test_node_passes_session_and_clock(monkeypatch):
     moment = datetime(2031, 5, 6, 7, 8)
-
-    class FrozenClock:
-        @staticmethod
-        def now():
-            return moment
-
     seen = []
 
     def spy(*args, **kwargs):
         seen.append((args, kwargs))
         return handle_turn(*args, **kwargs)
 
-    monkeypatch.setattr(assistant.agent, "datetime", FrozenClock)
+    freeze_clock(monkeypatch, moment)
     monkeypatch.setattr(assistant.agent, "handle_turn", spy)
     executions = InMemoryExecutions()
     fake = ScriptedLlm(script=[json.dumps(FIXED["A1"].interpretation)])
@@ -792,48 +540,13 @@ async def test_log_line_of_a_failed_and_an_uncertain_step(monkeypatch, caplog, m
     caplog.clear()
     await run_turn(runner, USER, session_id, FIXED["B4"].message)
 
-    [line] = _turn_records(caplog)
+    [line] = turn_records(caplog)
     key = execution_key(session_id, "create_ticket", step["normalized"])
     assert f"route=confirmed {expected.format(key=key)}" in line
     assert "None" not in line.split(" changes=")[0]
 
 
 # Brief 12 -------------------------------------------------------------------------------------
-
-
-# 12 (case F, TASK.md lines 395-417): the meeting is abandoned, the ticket starts from nothing,
-# and the log ties the turn to the new ticket. `F2` as measured and its `provide_info` variant.
-@pytest.mark.parametrize("act", ["request_action", "provide_info"])
-async def test_case_f_through_the_node(monkeypatch, caplog, act):
-    _no_tool_runs(monkeypatch)
-    caplog.set_level(logging.INFO, logger="assistant")
-    f2 = {**FIXED["F2"].interpretation, "act": act}
-    fake = ScriptedLlm(script=[json.dumps(FIXED["F1"].interpretation), json.dumps(f2)])
-    runner, sessions = make_runner(fake)
-
-    await run_turn(runner, USER, "s-f", FIXED["F1"].message)
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-f")
-    meeting = session.state["pending"]
-    caplog.clear()
-    events = await run_turn(runner, USER, "s-f", FIXED["F2"].message)
-
-    assert fake.calls == 2
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-f")
-    ticket = session.state["pending"]
-    assert ticket["tools"] == ["create_ticket"]
-    assert ticket["steps"] == [
-        {"tool": "create_ticket", "args": {"description": "revisar el servidor"}}
-    ]
-    [entry] = session.state["history"]
-    assert entry["operation_id"] == meeting["operation_id"]
-    assert entry["status"] == "abandoned"
-    assert entry["steps"] == [{"tool": "schedule_meeting", "args": {"attendees": ["Juan"]}}]
-    reply = event_text(reply_events(events)[0])
-    assert reply.startswith("No voy a programar una reunión; descarté lo que tenía pendiente.\n")
-    assert reply.endswith(ticket["last_question"])
-    [line] = _turn_records(caplog)
-    assert "route=other_tool:R2" in line
-    assert f"op={ticket['operation_id']}" in line
 
 
 # 13 (D7.3, TASK.md line 284): a "cancel" discards the notification; a later "yes" finds nothing.
@@ -860,7 +573,7 @@ async def test_cancel_through_the_node(monkeypatch, caplog):
     assert event_text(reply_events(second)[0]) == (
         "No voy a enviar una notificación; descarté lo que tenía pendiente."
     )
-    [line] = _turn_records(caplog)
+    [line] = turn_records(caplog)
     assert "route=cancelled" in line
     assert f"op={notification['operation_id']}" in line
 
@@ -875,213 +588,7 @@ async def test_cancel_through_the_node(monkeypatch, caplog):
 # Brief 13 -------------------------------------------------------------------------------------
 
 
-# 18 (case C, TASK.md lines 338-355, 282-284 and 436): the clarification is stored and asked;
-# "solo avísale" starts the notification with what C1 said; "por correo" completes it; the
-# "yes" runs only the notification. The log ties the first two turns to the same operation.
-async def test_case_c_through_the_node(monkeypatch, caplog):
-    calls = record_tools(monkeypatch)
-    results = record_results(monkeypatch)
-    caplog.set_level(logging.INFO, logger="assistant")
-    by_mail = {
-        "act": "provide_info",
-        "operations": [
-            {"tool": "send_notification", "certainty": "explicit", "args": {"channel": "correo"}}
-        ],
-    }
-    script = [FIXED["C1"].interpretation, FIXED["K2"].interpretation, by_mail]
-    script.append(FIXED["G2"].interpretation)
-    fake = ScriptedLlm(script=[json.dumps(item) for item in script])
-    runner, sessions = make_runner(fake)
-    messages = [FIXED["C1"].message, FIXED["K2"].message, "Por correo", FIXED["G2"].message]
-
-    answers, lines, records = [], [], []
-    for message in messages:
-        caplog.clear()
-        answers.append(event_text(reply_events(await run_turn(runner, USER, "s-cc", message))[0]))
-        [line] = _turn_records(caplog)
-        lines.append(line)
-        session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-cc")
-        records.append(session.state.get("pending"))
-
-    assert fake.calls == 4
-    clarification, notice, ready, closed = records
-    assert answers[0] == "¿Quieres enviar una notificación, programar una reunión, o ambas?"
-    assert clarification["status"] == "awaiting_clarification"
-    assert [c["tool"] for c in clarification["candidates"]] == [
-        "send_notification",
-        "schedule_meeting",
-    ]
-    assert answers[1].split("\n")[:2] == [
-        "Anoté a quién se envía: Carlos.",
-        "Anoté el mensaje: mañana revisamos el servidor.",
-    ]
-    assert answers[1].endswith(notice["last_question"])
-    assert notice["missing"] == ["channel"]
-    assert ready["status"] == "awaiting_confirmation"
-    assert answers[2].endswith(ready["last_question"])
-    assert closed is None
-    [result] = results["send_notification"]
-    assert answers[3] == f"Listo: envié la notificación {result['notification_id']}."
-    assert calls["send_notification"] == [
-        {"recipient": "Carlos", "message": "mañana revisamos el servidor", "channel": "email"}
-    ]
-    assert calls["schedule_meeting"] == [] and calls["create_ticket"] == []
-
-    operation = clarification["operation_id"]
-    assert notice["operation_id"] == operation
-    routes = ["route=R4 ", "route=clarification:regla_2 ", "route=same_tool ", "route=confirmed "]
-    for line, route in zip(lines, routes, strict=True):
-        assert route in line, line
-    assert f"op={operation}" in lines[0] and f"op={operation}" in lines[1]
-
-
-# 19 (D3 rule 1, TASK.md line 284): a "no" to the clarification discards it; a later "yes" finds
-# nothing to run.
-async def test_clarification_cancel_through_the_node(monkeypatch):
-    calls = record_tools(monkeypatch)
-    script = [FIXED[key].interpretation for key in ("C1", "S2", "G2")]
-    fake = ScriptedLlm(script=[json.dumps(item) for item in script])
-    runner, sessions = make_runner(fake)
-
-    await run_turn(runner, USER, "s-cx", FIXED["C1"].message)
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-cx")
-    clarification = session.state["pending"]
-    second = await run_turn(runner, USER, "s-cx", FIXED["S2"].message)
-
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-cx")
-    assert session.state["pending"] is None
-    [entry] = session.state["history"]
-    assert entry == {
-        "operation_id": clarification["operation_id"],
-        "status": "cancelled",
-        "steps": [{"tool": c["tool"], "args": c["args"]} for c in clarification["candidates"]],
-    }
-    assert len(entry["steps"]) == 2
-    assert event_text(reply_events(second)[0]) == (
-        "No inicié ninguna acción. Dime qué necesitas cuando quieras."
-    )
-
-    third = await run_turn(runner, USER, "s-cx", FIXED["G2"].message)
-
-    assert event_text(reply_events(third)[0]) == replies.NO_PENDING_OPERATION
-    assert all(not args for args in calls.values())
-    assert fake.calls == 3
-
-
 # Brief 14a ------------------------------------------------------------------------------------
-
-E1_QUESTION = (
-    "Para crear un ticket necesito el título y la descripción. "
-    "Para enviar una notificación necesito el mensaje."
-)
-ID_LINK_LINE = "El mensaje llevará al final el número de ticket."
-
-
-async def _conversation(runner, sessions, session_id, messages, caplog):
-    """Each message through the `Runner`: its reply, its log line and the stored `pending`."""
-    answers, lines, records = [], [], []
-    for message in messages:
-        caplog.clear()
-        events = await run_turn(runner, USER, session_id, message)
-        answers.append(event_text(reply_events(events)[0]))
-        [line] = _turn_records(caplog)
-        lines.append(line)
-        session = await sessions.get_session(
-            app_name="assistant", user_id=USER, session_id=session_id
-        )
-        records.append(session.state.get("pending"))
-    return answers, lines, records
-
-
-# 15 (case E, TASK.md lines 374-392), task 14b's test 11: the plan's "yes" (`E3`) runs the ticket,
-# then the notice with the ticket's number at the end of its message, and reports both.
-async def test_case_e_through_the_node(monkeypatch, caplog):
-    calls = record_tools(monkeypatch)
-    results = record_results(monkeypatch)
-    caplog.set_level(logging.INFO, logger="assistant")
-    keys = ("E1", "E2", "E3")
-    fake = ScriptedLlm(script=[json.dumps(FIXED[key].interpretation) for key in keys])
-    runner, sessions = make_runner(fake)
-
-    messages = [FIXED[key].message for key in keys]
-    answers, lines, records = await _conversation(runner, sessions, "s-ce", messages, caplog)
-
-    assert fake.calls == 3
-    plan, ready, after = records
-    assert answers[0].endswith(E1_QUESTION)
-    assert plan["tools"] == ["create_ticket", "send_notification"]
-    assert plan["steps"][1]["depends_on"] == "create_ticket"
-    assert plan["missing"] == ["title", "description", "message"]
-    assert ready["status"] == "awaiting_confirmation"
-    assert ID_LINK_LINE in answers[1].split("\n")
-    assert answers[1].endswith(ready["last_question"])
-
-    [ticket], [notice] = results["create_ticket"], results["send_notification"]
-    ticket_id, notice_id = ticket["ticket_id"], notice["notification_id"]
-    assert answers[2] == (
-        f"Listo: creé el ticket {ticket_id}.\nListo: envié la notificación {notice_id}."
-    )
-    [notice_args] = calls["send_notification"]
-    assert notice_args["message"] == f"ya se registró la falla (ticket {ticket_id})"
-    assert [len(calls[name]) for name in TOOLS] == [1, 0, 1]
-    assert after is None
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-ce")
-    [entry] = session.state["history"]
-    assert entry["operation_id"] == plan["operation_id"] and entry["status"] == "completed"
-    assert [(step["tool"], step["outcome"]) for step in entry["steps"]] == [
-        ("create_ticket", "ran"),
-        ("send_notification", "ran"),
-    ]
-
-    assert "route=R3 depends=send_notification<create_ticket invalid=" in lines[0]
-    assert "route=same_tool " in lines[1] and "depends=" not in lines[1]
-    ticket_key = execution_key("s-ce", "create_ticket", calls["create_ticket"][0])
-    notice_key = execution_key("s-ce", "send_notification", notice_args)
-    assert (
-        f"route=confirmed results=create_ticket:{ticket_id}:ran,"
-        f"send_notification:{notice_id}:ran idem={ticket_key},{notice_key} "
-    ) in lines[2]
-    assert "depends=" not in lines[2]
-    for line in lines:
-        assert f"op={plan['operation_id']}" in line
-
-
-# Task 14b's test 12 (D8.3; TASK.md line 270): the notice fails, as `MOCK_FAIL` makes it fail.
-async def test_partial_failure_through_the_node(monkeypatch, caplog):
-    spec = TOOLS["send_notification"]
-    failing = simulated(spec.contract, spec.result_id_field, "failure")
-    monkeypatch.setitem(TOOLS, "send_notification", dataclasses.replace(spec, execute=failing))
-    calls = record_tools(monkeypatch)
-    results = record_results(monkeypatch)
-    caplog.set_level(logging.INFO, logger="assistant")
-    keys = ("E1", "E2", "E3")
-    fake = ScriptedLlm(script=[json.dumps(FIXED[key].interpretation) for key in keys])
-    runner, sessions = make_runner(fake)
-
-    messages = [FIXED[key].message for key in keys]
-    answers, lines, _ = await _conversation(runner, sessions, "s-ce-fail", messages, caplog)
-
-    [ticket] = results["create_ticket"]
-    ticket_id = ticket["ticket_id"]
-    assert answers[2] == (
-        f"Listo: creé el ticket {ticket_id}.\n"
-        "No pude enviar una notificación: la herramienta respondió con un error. "
-        "Si me lo pides de nuevo, lo intento otra vez."
-    )
-    assert len(calls["send_notification"]) == 1
-    assert (
-        f"route=confirmed results=create_ticket:{ticket_id}:ran,send_notification:-:failed idem="
-    ) in lines[2]
-    session = await sessions.get_session(app_name="assistant", user_id=USER, session_id="s-ce-fail")
-    [entry] = session.state["history"]
-    assert entry["status"] == "failed"
-    assert [(step["tool"], step["outcome"]) for step in entry["steps"]] == [
-        ("create_ticket", "ran"),
-        ("send_notification", "failed"),
-    ]
-    [notice_args] = calls["send_notification"]
-    assert notice_args["message"] == f"ya se registró la falla (ticket {ticket_id})"
-    assert session.state["pending"] is None
 
 
 # 16 (D8.4: "el log anota que la dependencia se infirió")
@@ -1094,41 +601,13 @@ async def test_inferred_dependency_through_the_node(monkeypatch, caplog):
     runner, sessions = make_runner(fake)
 
     message = [FIXED["E1"].message]
-    _, [reported], [given] = await _conversation(runner, sessions, "s-e-1", message, caplog)
-    _, [inferred], [plan] = await _conversation(runner, sessions, "s-e-2", message, caplog)
+    _, [reported], [given] = await conversation(runner, sessions, "s-e-1", message, caplog)
+    _, [inferred], [plan] = await conversation(runner, sessions, "s-e-2", message, caplog)
 
     assert without_id(plan) == without_id(given)
     assert "depends=send_notification<create_ticket:inferred " in inferred
     assert "depends=send_notification<create_ticket " in reported
     assert all(not args for args in calls.values())
-
-
-# 17 ((A17); case C's third reading, TASK.md lines 344-350)
-async def test_case_c_both_through_the_node(monkeypatch, caplog):
-    calls = record_tools(monkeypatch)
-    caplog.set_level(logging.INFO, logger="assistant")
-    keys = ("C1", "K1")
-    fake = ScriptedLlm(script=[json.dumps(FIXED[key].interpretation) for key in keys])
-    runner, sessions = make_runner(fake)
-
-    messages = [FIXED[key].message for key in keys]
-    answers, lines, records = await _conversation(runner, sessions, "s-cb", messages, caplog)
-
-    clarification, plan = records
-    assert answers[1].split("\n")[:4] == [
-        "Anoté a quién se envía: Carlos.",
-        "Anoté el mensaje: mañana revisamos el servidor.",
-        "Anoté la fecha: mañana.",
-        "Anoté los asistentes: Carlos.",
-    ]
-    assert answers[1].endswith(plan["last_question"])
-    assert plan["tools"] == ["send_notification", "schedule_meeting"]
-    assert "candidates" not in plan
-    assert plan["operation_id"] == clarification["operation_id"]
-    assert "route=clarification:regla_2 depends= invalid=" in lines[1]
-    assert f"op={clarification['operation_id']}" in lines[1]
-    assert all(not args for args in calls.values())
-    assert fake.calls == 2
 
 
 # Round 2 of brief 14a (the author's amendment to D3.1): "Cancela la reunión y crea un ticket"
@@ -1155,7 +634,7 @@ async def test_cancel_and_another_tool_through_the_node(monkeypatch, caplog):
         "Cancela la reunión y crea un ticket para revisar el servidor",
     ]
 
-    answers, lines, records = await _conversation(runner, sessions, "s-cx2", messages, caplog)
+    answers, lines, records = await conversation(runner, sessions, "s-cx2", messages, caplog)
 
     meeting, ticket = records
     assert ticket["tools"] == ["create_ticket"]
