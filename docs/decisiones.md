@@ -11,6 +11,9 @@ del autor (2026-11-16): la opción más chica que cumple TASK.md y las decisione
 autor puede revertirla. Una decisión de diseño nueva que cambie lo que ve el usuario, cuándo se
 ejecuta una tool o qué se guarda se sigue consultando al autor.
 
+Las menciones de *brief*, *tarea*, *ronda* y `reviews/` son notas de trabajo del equipo que no
+están en el repositorio.
+
 **D1 · Control del ciclo de ejecución: opción B** (2026-11-16)
 
 - **Decisión:** el LLM solo interpreta (`LlmAgent` con `output_schema`, sin acceso a las tools
@@ -1877,7 +1880,7 @@ orquestador; revisable
 - **Descartadas:** meter `history` en `TurnInput` (D42 lo reservó para lo que no es estado); que
   el nodo agregue la entrada (lógica en el adaptador).
 - **Lo prueban:** `test_confirmed_operation_goes_to_history` (también con " Carlos "),
-  `test_history_keeps_the_last_ten`, `test_only_a_confirmed_yes_writes_history`,
+  `test_history_keeps_the_last_ten`, `test_only_a_closing_writes_history`,
   `test_history_accumulates_and_is_never_read` (el nodo pasa lo guardado y el modelo no lo ve),
   `test_case_b_through_the_node`, `test_case_g_through_the_node` y
   `test_confirmed_operation_is_gone_after_reload` (una instancia nueva de `RedisSessionService`

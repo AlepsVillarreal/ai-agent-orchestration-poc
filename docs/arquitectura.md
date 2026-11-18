@@ -15,7 +15,7 @@ flowchart TD
     extUser["Usuario"]
     extGemini["Modelo Gemini<br/>gemini-3.5-flash-lite"]
     cli["CLI · chat<br/>una línea de stdin = un mensaje"]
-    redis["Redis 7 con AOF<br/>sesiones y claves idem: con TTL de 24 h<br/>started / done"]
+    redis["Redis 7 con AOF<br/>sesiones (TTL 7 días) · claves idem: (TTL 24 h)<br/>started / done"]
     log["log assistant.turn<br/>una línea por turno en stderr"]
     subgraph adk["Google ADK"]
         runner["Runner"]
